@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+*.spec.bak
+
+# 模型 / 缓存
+models/features_cache.npz
+models/oof_*.npz
+# wav2vec2 权重约 360 MB，超过 GitHub 单文件 100 MB 限制：
+# 请用 Git LFS 或 Release 附件分发（见 models/README.md）
+models/w2v_ckpt.pt
+*.joblib.tmp
+
+# 数据
+data/
+outputs/
+predictions.csv
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/
+nohup.out
