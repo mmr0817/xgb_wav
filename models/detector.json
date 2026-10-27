@@ -1,0 +1,10 @@
+{
+  "xgb_model": "xgb_pipeline.joblib",
+  "w2v_ckpt": "w2v_ckpt.pt",
+  "fusion": "fusion.json",
+  "ref_sweep": "ref_sweep.wav",
+  "w2v_sample_rate": 16000,
+  "w2v_max_duration": 2.5,
+  "w2v_hidden": 256,
+  "batch_size": 128
+}

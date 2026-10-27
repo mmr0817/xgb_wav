@@ -26,7 +26,7 @@ from typing import List
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.preprocessing import StandardScaler
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,7 +54,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--out", default="models")
     p.add_argument("--ref", default=None, help="参考扫频 wav（默认 <out>/ref_sweep.wav）")
     p.add_argument("--cache", default=None, help="特征缓存（默认 <out>/features_cache.npz）")
-    p.add_argument("--oof-folds", type=int, default=3)
+    p.add_argument("--oof-folds", type=int, default=0,
+                   help=">1 时用 K 折 OOF 标定（慢，且折模型较弱时阈值偏保守）")
+    p.add_argument("--calib-frac", type=float, default=0.1,
+                   help="留出标定集比例（默认 0.1，即 10%%；推荐；0 且 oof-folds<=1 时无法标定）")
+    p.add_argument("--refit-all", action="store_true",
+                   help="标定后用全部数据重训（阈值沿用，可能与新模型分布略有偏差）")
     p.add_argument("--oof-epochs", type=int, default=35)
     p.add_argument("--final-epochs", type=int, default=60)
     p.add_argument("--batch-size", type=int, default=128)
@@ -127,7 +132,7 @@ def train_w2v(paths: List[Path], labels: np.ndarray, epochs: int, batch_size: in
             scaler.update()
             opt.zero_grad()
             sched.step()
-            loss_sum += float(loss)
+            loss_sum += float(loss.detach())
             n += 1
         if epoch % log_every == 0 or epoch == epochs:
             print(f"    [w2v] epoch {epoch}/{epochs} loss={loss_sum / max(1, n):.4f}")
@@ -146,15 +151,135 @@ def w2v_probs(model: Wav2VecClassifier, paths: List[Path], batch_size: int,
 
 
 def fit_xgb(X: np.ndarray, y: np.ndarray, seed: int = 42, n_estimators: int = 800):
+    """在给定数据上训练 XGB（无验证集，不做早停）。"""
     scaler = StandardScaler()
     Xs = scaler.fit_transform(X)
     params = build_params(n_estimators=n_estimators,
                           scale_pos_weight=compute_scale_pos_weight(y),
                           seed=seed, device="cpu", max_depth=4, learning_rate=0.05)
-    params.pop("early_stopping_rounds", None)  # 全量训练，无验证集
+    params.pop("early_stopping_rounds", None)
     clf = make_classifier(params)
     fit_classifier(clf, Xs, y)
     return clf, scaler
+
+
+def _metrics(y_true: np.ndarray, fused: np.ndarray, thr: float) -> dict:
+    pred = (fused >= thr).astype(int)
+    tp = int(((pred == 1) & (y_true == 1)).sum())
+    fp = int(((pred == 1) & (y_true == 0)).sum())
+    fn = int(((pred == 0) & (y_true == 1)).sum())
+    return {"n": int(len(y_true)), "bad": int(y_true.sum()), "threshold": float(thr),
+            "recall": float(tp / max(1, tp + fn)),
+            "precision": float(tp / max(1, tp + fp)),
+            "fp": fp, "fn": fn, "n_good": int((y_true == 0).sum())}
+
+
+def save_bundle(out: Path, clf, scaler, feat_cfg, w2v, mu_x, sd_x, mu_w, sd_w,
+                thr, margin, metrics, n_train, batch_size, extra=None) -> None:
+    import joblib
+
+    joblib.dump({"model": clf, "scaler": scaler, "feat_cfg": feat_cfg.__dict__,
+                 "feature_dim": int(scaler.n_features_in_), "n_train": int(n_train)},
+                out / "xgb_pipeline.joblib")
+    torch.save({"model_state_dict": w2v.state_dict(),
+                "config": {"num_labels": 2, "hidden_size": 256, "dropout": 0.1,
+                           "sample_rate": SR, "max_duration": MAX_DUR,
+                           "n_train": int(n_train)}}, out / "w2v_ckpt.pt")
+    fusion = {
+        "fusion": "mean_standardized_logit",
+        "members": {"xgb": {"model": "xgb_pipeline.joblib", "logit_mean": mu_x, "logit_std": sd_x},
+                    "w2v": {"model": "w2v_ckpt.pt", "logit_mean": mu_w, "logit_std": sd_w}},
+        "threshold": float(thr), "margin": float(margin), "target_recall": 0.995,
+        "label_map": {"0": "good", "1": "bad"},
+        "calibration": metrics,
+        "trained_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    if extra:
+        fusion.update(extra)
+    (out / "fusion.json").write_text(json.dumps(fusion, indent=2, ensure_ascii=False),
+                                     encoding="utf-8")
+    detector = {"xgb_model": "xgb_pipeline.joblib", "w2v_ckpt": "w2v_ckpt.pt",
+                "fusion": "fusion.json", "ref_sweep": "ref_sweep.wav",
+                "w2v_sample_rate": SR, "w2v_max_duration": MAX_DUR, "w2v_hidden": 256,
+                "batch_size": int(batch_size)}
+    (out / "detector.json").write_text(json.dumps(detector, indent=2, ensure_ascii=False),
+                                       encoding="utf-8")
+
+
+def run_holdout(args, X, y, paths, feat_cfg, device, out: Path, ref: Path) -> None:
+    """留出标定：训练集 + 留出标定集（推荐）。"""
+    from xgb_wav.fusion import logit
+
+    idx = np.arange(len(y))
+    tr, ca = train_test_split(idx, test_size=args.calib_frac, stratify=y, random_state=args.seed)
+    print(f"标定方案：训练 {len(tr)} / 留出 {len(ca)}（留出中 bad {int(y[ca].sum())}）")
+
+    t0 = time.time()
+    clf, scaler = fit_xgb(X[tr], y[tr], seed=args.seed)
+    p_x = predict_bad_proba(clf, scaler.transform(X[ca]))
+    print(f"  XGB 完成（{time.time() - t0:.0f}s）")
+
+    t0 = time.time()
+    w2v = train_w2v([paths[i] for i in tr], y[tr], args.final_epochs,
+                    args.batch_size, device, seed=args.seed)
+    p_w = w2v_probs(w2v, [paths[i] for i in ca], args.batch_size, device)
+    print(f"  wav2vec2 完成（{time.time() - t0:.0f}s）")
+
+    lx, lw = logit(p_x), logit(p_w)
+    mu_x, sd_x = float(lx.mean()), float(lx.std() + 1e-9)
+    mu_w, sd_w = float(lw.mean()), float(lw.std() + 1e-9)
+    fused = ((lx - mu_x) / sd_x + (lw - mu_w) / sd_w) / 2.0
+    y_ca = y[ca]
+    thr = float(fused[y_ca == 1].min() - args.margin)
+    m = _metrics(y_ca, fused, thr)
+    print(f"留出集标定：阈值={thr:.4f} 召回={m['recall']:.4f} 精度={m['precision']:.4f} "
+          f"误杀={m['fp']}/{m['n_good']}（{m['fp'] / max(1, m['n_good']):.1%}）漏检={m['fn']}")
+
+    if args.refit_all:
+        print("按 --refit-all 用全部数据重训（阈值/统计量沿用留出集）…")
+        clf, scaler = fit_xgb(X, y, seed=args.seed)
+        w2v = train_w2v(paths, y, args.final_epochs, args.batch_size, device, seed=args.seed)
+
+    save_bundle(out, clf, scaler, feat_cfg, w2v, mu_x, sd_x, mu_w, sd_w, thr,
+                args.margin, m, len(X) if args.refit_all else len(tr), args.batch_size,
+                extra={"calib_frac": args.calib_frac, "refit_all": bool(args.refit_all)})
+    print(f"\n模型已写出到 {out}: xgb_pipeline.joblib / w2v_ckpt.pt / fusion.json / detector.json")
+
+
+def run_oof(args, X, y, paths, feat_cfg, device, out: Path, ref: Path) -> None:
+    """K 折 OOF 标定（不建议：折模型弱于最终模型时阈值会过于保守）。"""
+    from xgb_wav.fusion import logit
+
+    if args.oof_folds < 2:
+        raise SystemExit("请设置 --calib-frac（推荐 0.1）或 --oof-folds >= 2")
+    oof_x = np.full(len(y), np.nan)
+    oof_w = np.full(len(y), np.nan)
+    for k, (tr, te) in enumerate(
+            StratifiedKFold(args.oof_folds, shuffle=True, random_state=args.seed)
+            .split(np.zeros(len(y)), y), 1):
+        t0 = time.time()
+        clf, sc = fit_xgb(X[tr], y[tr], seed=args.seed)
+        oof_x[te] = predict_bad_proba(clf, sc.transform(X[te]))
+        m = train_w2v([paths[i] for i in tr], y[tr], args.oof_epochs,
+                      args.batch_size, device, seed=args.seed)
+        oof_w[te] = w2v_probs(m, [paths[i] for i in te], args.batch_size, device)
+        print(f"  fold {k}/{args.oof_folds} 完成（{time.time() - t0:.0f}s）")
+
+    ok = ~np.isnan(oof_x) & ~np.isnan(oof_w)
+    lx, lw = logit(oof_x[ok]), logit(oof_w[ok])
+    mu_x, sd_x = float(lx.mean()), float(lx.std() + 1e-9)
+    mu_w, sd_w = float(lw.mean()), float(lw.std() + 1e-9)
+    fused = ((lx - mu_x) / sd_x + (lw - mu_w) / sd_w) / 2.0
+    yv = y[ok]
+    thr = float(fused[yv == 1].min() - args.margin)
+    m = _metrics(yv, fused, thr)
+    print(f"OOF 标定：阈值={thr:.4f} 召回={m['recall']:.4f} 精度={m['precision']:.4f} "
+          f"误杀={m['fp']}/{m['n_good']} 漏检={m['fn']}")
+
+    clf, scaler = fit_xgb(X, y, seed=args.seed)
+    w2v = train_w2v(paths, y, args.final_epochs, args.batch_size, device, seed=args.seed)
+    save_bundle(out, clf, scaler, feat_cfg, w2v, mu_x, sd_x, mu_w, sd_w, thr,
+                args.margin, m, len(X), args.batch_size, extra={"oof_folds": args.oof_folds})
 
 
 def main() -> None:
@@ -177,83 +302,25 @@ def main() -> None:
     paths = [Path(p) for p in kept]
     print(f"特征 {X.shape}（参考音频: {'有' if extractor.ref_wav is not None else '无'}）")
 
-    # ---------------- OOF 标定 ----------------
-    if args.oof_folds < 2:
-        raise SystemExit("--oof-folds 至少为 2（需要 OOF 来标定阈值）")
-    oof_x = np.full(len(y), np.nan)
-    oof_w = np.full(len(y), np.nan)
-    skf = StratifiedKFold(args.oof_folds, shuffle=True, random_state=args.seed)
-    for k, (tr, te) in enumerate(skf.split(np.zeros(len(y)), y), 1):
-        t0 = time.time()
-        clf, sc = fit_xgb(X[tr], y[tr], seed=args.seed)
-        oof_x[te] = predict_bad_proba(clf, sc.transform(X[te]))
-        m = train_w2v([paths[i] for i in tr], y[tr], args.oof_epochs,
-                      args.batch_size, device, seed=args.seed)
-        oof_w[te] = w2v_probs(m, [paths[i] for i in te], args.batch_size, device)
-        print(f"  fold {k}/{args.oof_folds} 完成（{time.time() - t0:.0f}s）")
-
-    ok = ~np.isnan(oof_x) & ~np.isnan(oof_w)
-    lx, lw = np.log(np.clip(oof_x[ok], 1e-7, 1 - 1e-7) /
-                    (1 - np.clip(oof_x[ok], 1e-7, 1 - 1e-7))), \
-             np.log(np.clip(oof_w[ok], 1e-7, 1 - 1e-7) /
-                    (1 - np.clip(oof_w[ok], 1e-7, 1 - 1e-7)))
-    mu_x, sd_x = float(lx.mean()), float(lx.std() + 1e-9)
-    mu_w, sd_w = float(lw.mean()), float(lw.std() + 1e-9)
-    fused = (((lx - mu_x) / sd_x) + ((lw - mu_w) / sd_w)) / 2.0
-    yv = y[ok]
-    thr = float(fused[yv == 1].min() - args.margin)
-    pred = (fused >= thr).astype(int)
-    oof_metrics = {
-        "n": int(len(yv)), "bad": int(yv.sum()),
-        "threshold": thr, "margin": args.margin,
-        "recall": float((pred[yv == 1] == 1).mean()),
-        "precision": float(pred[yv == 1].sum() / max(1, pred.sum())),
-        "fp": int(((pred == 1) & (yv == 0)).sum()),
-        "fn": int(((pred == 0) & (yv == 1)).sum()),
-    }
-    print(f"OOF 标定：阈值={thr:.4f} 召回={oof_metrics['recall']:.4f} "
-          f"精度={oof_metrics['precision']:.4f} 误杀={oof_metrics['fp']}/{int((yv == 0).sum())} "
-          f"漏检={oof_metrics['fn']}")
-
-    # ---------------- 全量训练 ----------------
-    print("训练最终 XGB（全部数据）…")
-    clf, scaler = fit_xgb(X, y, seed=args.seed)
-    import joblib
-
-    joblib.dump({"model": clf, "scaler": scaler, "feat_cfg": feat_cfg.__dict__,
-                 "feature_dim": int(X.shape[1]), "n_train": int(len(y))},
-                out / "xgb_pipeline.joblib")
-    print("训练最终 wav2vec2（全部数据）…")
-    w2v = train_w2v(paths, y, args.final_epochs, args.batch_size, device, seed=args.seed)
-    torch.save({"model_state_dict": w2v.state_dict(),
-                "config": {"num_labels": 2, "hidden_size": 256, "dropout": 0.1,
-                           "sample_rate": SR, "max_duration": MAX_DUR,
-                           "epochs": args.final_epochs, "n_train": int(len(y))}},
-               out / "w2v_ckpt.pt")
-
-    fusion = {
-        "fusion": "mean_standardized_logit",
-        "members": {
-            "xgb": {"model": "xgb_pipeline.joblib", "logit_mean": mu_x, "logit_std": sd_x},
-            "w2v": {"model": "w2v_ckpt.pt", "logit_mean": mu_w, "logit_std": sd_w},
-        },
-        "threshold": thr, "margin": args.margin, "target_recall": 0.995,
-        "label_map": {"0": "good", "1": "bad"},
-        "oof_folds": args.oof_folds, "oof_metrics": oof_metrics,
-        "trained_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    (out / "fusion.json").write_text(json.dumps(fusion, indent=2, ensure_ascii=False), encoding="utf-8")
-    detector = {
-        "xgb_model": "xgb_pipeline.joblib", "w2v_ckpt": "w2v_ckpt.pt",
-        "fusion": "fusion.json",
-        "ref_sweep": "ref_sweep.wav" if ref.exists() else None,
-        "w2v_sample_rate": SR, "w2v_max_duration": MAX_DUR, "w2v_hidden": 256,
-        "batch_size": args.batch_size,
-    }
-    (out / "detector.json").write_text(json.dumps(detector, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"\n模型已写出到 {out}: xgb_pipeline.joblib / w2v_ckpt.pt / fusion.json / detector.json")
+    if args.calib_frac and args.calib_frac > 0:
+        run_holdout(args, X, y, paths, feat_cfg, device, out, ref)
+    else:
+        run_oof(args, X, y, paths, feat_cfg, device, out, ref)
 
 
 if __name__ == "__main__":
     main()
+
+
+def fit_xgb(X: np.ndarray, y: np.ndarray, seed: int = 42, n_estimators: int = 800):
+    scaler = StandardScaler()
+    Xs = scaler.fit_transform(X)
+    params = build_params(n_estimators=n_estimators,
+                          scale_pos_weight=compute_scale_pos_weight(y),
+                          seed=seed, device="cpu", max_depth=4, learning_rate=0.05)
+    params.pop("early_stopping_rounds", None)  # 全量训练，无验证集
+    clf = make_classifier(params)
+    fit_classifier(clf, Xs, y)
+    return clf, scaler
+
 

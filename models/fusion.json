@@ -1,0 +1,35 @@
+{
+  "fusion": "mean_standardized_logit",
+  "members": {
+    "xgb": {
+      "model": "xgb_pipeline.joblib",
+      "logit_mean": -6.723929405212402,
+      "logit_std": 6.50451135635376
+    },
+    "w2v": {
+      "model": "w2v_ckpt.pt",
+      "logit_mean": -1.1094517707824707,
+      "logit_std": 1.3180711269378662
+    }
+  },
+  "threshold": 0.3134957551956177,
+  "margin": 0.2,
+  "target_recall": 0.995,
+  "label_map": {
+    "0": "good",
+    "1": "bad"
+  },
+  "calibration": {
+    "n": 204,
+    "bad": 31,
+    "threshold": 0.3134957551956177,
+    "recall": 1.0,
+    "precision": 0.9117647058823529,
+    "fp": 3,
+    "fn": 0,
+    "n_good": 173
+  },
+  "trained_at": "2026-10-27 15:11:27",
+  "calib_frac": 0.1,
+  "refit_all": false
+}
