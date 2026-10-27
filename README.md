@@ -153,13 +153,31 @@ python scripts/train_production.py \
 
 脚本会：
 1. 提取 114 维特征（缓存到 `models/features_cache.npz`）；
-2. 做 K 折 **OOF**，得到全量样本的「拿不到自己」的概率；
-3. 用 OOF 统计量标定融合阈值（`min(OOF bad) − margin`，默认 margin=0.2）；
-4. 用**全部数据**训练最终 XGB 与 wav2vec2；
+2. 分层切出 **10% 留出标定集**（`--calib-frac`，默认 0.1），其余 90% 训练；
+3. 在留出集上算 logit 标准化统计量与阈值（`min(留出 bad) − margin`，默认 margin=0.2）；
+4. （可选）`--oof-folds >1` 改用 K 折 OOF 标定——更慢，且折模型偏弱时阈值过于保守；
 5. 写出 `xgb_pipeline.joblib` / `w2v_ckpt.pt` / `fusion.json` / `detector.json`。
 
 > 单卡 24 GB 时 batch 128 足够；显存不足会自动 OOM，请调小 `--batch-size`。
-> 2031 条样本、3 折 OOF + 全量训练约 20 分钟（RTX PRO 4000 级别）。
+> 2031 条样本、留出标定 + 最终训练约 12 分钟（RTX PRO 4000 级别）。
+
+## 测试
+
+```bash
+# 1) 单元/冒烟测试（无显示器也能跑）
+PYTHONPATH=src python -m pytest tests/test_smoke.py -q
+
+# 2) 用已训练权重评测（见上文「评测 / 回归自测」）
+python test.py --data ../rs20262/data/raw --holdout --sweep
+
+# 3) GUI 冒烟测试（需要图形环境；无 DISPLAY 会自动跳过）
+python tests/gui_smoke.py --input /tmp/demo_wav
+#   Linux 无桌面但有 X 时：DISPLAY=:1 python tests/gui_smoke.py
+```
+
+GUI 冒烟测试会真实创建窗口并模拟「选择文件夹 → 开始检测」，
+校验模型加载、按钮状态、表格行数、自动导出 CSV 与错误恢复，并把截图写到
+`outputs/gui_smoke/`。当前结果：**16/16 项通过**。
 
 ## 打包 Windows exe
 
