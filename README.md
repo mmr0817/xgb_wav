@@ -197,7 +197,22 @@ PyInstaller **不支持跨平台交叉编译**，exe 必须在 Windows 上构建
 > `UnicodeEncodeError` 退出。现在所有入口都会把控制台切到 UTF-8 并做
 > `errors="replace"` 兜底，不会再因为一个字符崩掉。
 
-### 打包
+### 用 GitHub Actions 构建 exe（没有 x64 Windows 机器时首选）
+
+> ⚠️ **Apple Silicon 上的 Parallels 跑的是 Windows 11 ARM64，而 PyTorch 没有
+> `win_arm64` 轮子**（PyPI 上 2.6–2.9 均为 0 个），`pip install torch` 必然失败。
+> 所以「Mac + Parallels」无法直接跑本项目，请用下面任一方式：
+> ① 在 macOS 上原生跑（`python run_gui.py`，torch 有 macOS arm64 轮子）；
+> ② 用本仓库的 Actions 在 GitHub 的 x64 Windows 上打包 exe。
+
+1. 先上传权重到 Release（只需一次）：GitHub → Releases → *Draft a new release* →
+   把本地 `models/w2v_ckpt.pt`（361 MB）拖进去 → Publish。
+2. 打开 Actions → **build-windows-exe** → *Run workflow*。
+3. 跑完在 Artifact 里下载 `xgb_wav-windows-x64.zip`，解压即用（内含 `xgb_wav.exe` + `_internal` + `models`）。
+
+工作流文件：`.github/workflows/build-windows-exe.yml`（x64 + CPU torch + 自检 + 打包 + 上传产物）。
+
+### 本地打包（有 x64 Windows 时）
 
 ```bat
 cd /d D:\xgb_wav

@@ -6,19 +6,27 @@
 
 ## 0. 前置条件
 
+> ⚠️ **不要用 Apple Silicon Mac 上的 Parallels（Windows 11 ARM64）**：
+> PyTorch 没有 `win_arm64` 轮子（PyPI 2.6–2.9 均为 0 个），`pip install torch` 会直接失败。
+> 想在 Mac 上验证，请在 **macOS 原生**跑（torch 有 macOS arm64 轮子）：
+> `python run_gui.py`；想拿 exe 就用仓库的 GitHub Actions（`build-windows-exe`）。
+
 | 项目 | 要求 |
 |---|---|
-| 系统 | Windows 10 / 11，64 位 |
+| 系统 | Windows 10 / 11，**64 位（x86_64 / AMD64）** |
 | Python | **3.10 / 3.11 / 3.12（64 位）**，安装时勾选 `Add python.exe to PATH` |
 | 磁盘 | ≥ 8 GB（依赖约 2.5 GB + 打包产物约 2 GB） |
 | 显卡 | **不需要**（默认装 CPU 版 torch，wheel 约 109–241 MB） |
 | 网络 | 打包时需联网装依赖；**打好的 exe 运行时可完全离线** |
 
-检查 Python：
+检查 Python（顺带确认不是 ARM64）：
 
 ```bat
-python -c "import sys; print(sys.version, sys.maxsize > 2**32)"
+python -c "import sys, platform; print(sys.version, sys.maxsize > 2**32, platform.machine())"
 ```
+
+`platform.machine()` 必须是 `AMD64`；若显示 `ARM64`，请换 x64 Windows 或直接用
+GitHub Actions 构建。
 
 ## 1. 解压到短路径
 
