@@ -50,7 +50,12 @@ xgb_wav/
 ```bash
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+
+# 顺手把本包装进当前环境（让 `python -m xgb_wav.*` 和 `xgb-wav-gui` 可用）
+pip install -e .
 ```
+
+> 不想安装也可以：仓库根目录直接 `python run_gui.py`（脚本自己把 `src/` 加进 `sys.path`）。
 
 依赖：`torch`/`torchaudio`（wav2vec2）、`xgboost`、`scikit-learn`、`librosa`、`soundfile`、
 `numpy`、`scipy`、`pandas`、`joblib`、`pyyaml`。GPU 可选（自动检测，CPU 亦可跑）。
@@ -64,8 +69,9 @@ pip install -r requirements.txt
 ### 1) 图形界面
 
 ```bash
-python -m xgb_wav.gui          # 未打包时
-# 或双击 xgb_wav.exe（打包后）
+python run_gui.py              # 零安装直接跑（推荐）
+# 或安装后： python -m xgb_wav.gui   /   xgb-wav-gui
+# Windows 打包后：双击 xgb_wav.exe
 ```
 
 界面流程：选择模型目录（默认 `models/`）→ 选择 wav 文件或文件夹 → 开始检测 →
@@ -88,6 +94,34 @@ df = det.predict_dir("/path/to/wavs")             # 或 det.predict_paths([...])
 det.save_csv(df, "result.csv")
 print(df[["file", "label", "score"]])
 ```
+
+### 4) 评测 / 回归自测（`test.py`）
+
+用已训练权重直接跑评测，**不重新训练**：
+
+```bash
+# 推荐：只评训练时的留出标定集（复现同一划分，指标最可信）
+python test.py --data ../rs20262/data/raw --holdout --sweep
+
+# 全量带标签目录评测（与训练集重叠 → 指标偏乐观，仅作回归自测）
+python test.py --data ../rs20262/data/raw --sweep
+
+# 无标签：只推理并导出 CSV（文件或目录都行）
+python test.py --input D:\wavs
+
+# 产线门禁：召回低于 99.5% 时进程返回 1
+python test.py --data <带good/bad的目录> --holdout --min-recall 0.995
+```
+
+产物默认写到 `outputs/eval/`（`--out-dir` 可改）：
+
+| 文件 | 内容 |
+|---|---|
+| `predictions.csv` | 每条音频的融合分、两路概率、预测、真值、是否正确 |
+| `metrics.json` | 主指标 + 混淆矩阵 + 分通道 + 两路成员单独表现 |
+| `REPORT.md` | Markdown 报表（含阈值扫描：F1 最优 / 零漏检边界 / margin 余量） |
+
+`--threshold` 可临时覆盖阈值做 A/B，`--limit N` 快速冒烟，`--device cpu` 强制 CPU。
 
 ### CSV 字段
 

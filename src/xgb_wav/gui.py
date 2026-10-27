@@ -139,10 +139,11 @@ class App(tk.Tk):
     def _load_model_async(self) -> None:
         self.status.set("正在加载模型…")
         self.run_btn.configure(state="disabled")
+        model_dir = self.model_var.get()      # Tk 变量只能在主线程读取
 
         def work():
             try:
-                det = FusionDetector.from_dir(self.model_var.get(), device="auto")
+                det = FusionDetector.from_dir(model_dir, device="auto")
                 self.queue.put(("model", det))
             except Exception as e:
                 self.queue.put(("error", f"模型加载失败: {e}"))
