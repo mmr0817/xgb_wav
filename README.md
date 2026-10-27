@@ -55,8 +55,9 @@ pip install -r requirements.txt
 依赖：`torch`/`torchaudio`（wav2vec2）、`xgboost`、`scikit-learn`、`librosa`、`soundfile`、
 `numpy`、`scipy`、`pandas`、`joblib`、`pyyaml`。GPU 可选（自动检测，CPU 亦可跑）。
 
-> wav2vec2 主干使用 `torchaudio.pipelines.WAV2VEC2_BASE`，首次运行会自动下载（约 360 MB），
-> 之后缓存在 `~/.cache/torch/hub/checkpoints/`。
+> wav2vec2 主干按 `models/detector.json` 中的 `w2v_arch` **本地构建**，再用自带 `w2v_ckpt.pt`
+> 覆盖全部权重，因此**完全离线**：运行时不下载任何预训练权重（旧版会下载约 360 MB）。
+> 已实测「清空 torch 缓存」与「联网」两条路径输出逐位一致。
 
 ## 使用
 
@@ -128,17 +129,23 @@ python scripts/train_production.py \
 
 ## 打包 Windows exe
 
-PyInstaller **不支持跨平台交叉编译**，exe 必须在 Windows 上构建：
+PyInstaller **不支持跨平台交叉编译**，exe 必须在 Windows 上构建。完整图文步骤见
+**[`docs/BUILD_WINDOWS.md`](docs/BUILD_WINDOWS.md)**，TL;DR：
 
 ```bat
-:: 在 Windows 的仓库根目录执行（需先 pip install -r requirements.txt pyinstaller）
+:: Windows 10/11 64 位 + Python 3.10~3.12(64bit)，解压到 D:\xgb_wav 后：
+cd /d D:\xgb_wav
 scripts\build_exe.bat
 ```
 
-生成 `dist\xgb_wav\xgb_wav.exe`。首次启动会检查同目录下的 `models\`，
-请把 `models\` 一并拷到 exe 同级目录（或打包时用 `--add-data` 内置，见 spec 注释）。
+脚本会依次：检查 Python → 装 CPU 版 torch 等依赖 → 校验 `models\` 5 个文件 →
+**先跑一遍 CLI 自检** → PyInstaller 打包 → 把 `models\` 复制到 exe 同级。
 
-体积提示：torch + wav2vec2 会让产物达到 1.5–3 GB，属于正常现象。
+产物 `dist\xgb_wav\`（`xgb_wav.exe` + `_internal\` + `models\`），**整个目录一起分发**，
+目标机器无需 Python、无需联网。体积约 1.2–2.0 GB（torch 占大头）。
+
+常用开关：`set SKIP_PIP=1`（跳过装依赖）、`set NO_SELFTEST=1`（跳过自检）、
+`set CUDA=1`（有 NVIDIA 卡时装 CUDA 版 torch）。
 
 ## 模型与阈值说明
 

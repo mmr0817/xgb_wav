@@ -1,0 +1,135 @@
+# Windows 打包与部署指南（`xgb_wav.exe`）
+
+> 本机是 Linux，PyInstaller **不能交叉编译**，所以 exe 必须在 Windows 上生成。
+> 本目录（`xgb_wav_windows.zip` 解压后）已包含：源码、`models/`（含 361 MB 权重）、
+> 打包脚本、spec、依赖清单。按下面 5 步即可产出 exe。
+
+## 0. 前置条件
+
+| 项目 | 要求 |
+|---|---|
+| 系统 | Windows 10 / 11，64 位 |
+| Python | **3.10 / 3.11 / 3.12（64 位）**，安装时勾选 `Add python.exe to PATH` |
+| 磁盘 | ≥ 8 GB（依赖约 2.5 GB + 打包产物约 2 GB） |
+| 显卡 | **不需要**（默认装 CPU 版 torch，wheel 约 109–241 MB） |
+| 网络 | 打包时需联网装依赖；**打好的 exe 运行时可完全离线** |
+
+检查 Python：
+
+```bat
+python -c "import sys; print(sys.version, sys.maxsize > 2**32)"
+```
+
+## 1. 解压到短路径
+
+推荐 `D:\xgb_wav`（**避免**中文路径、空格、OneDrive 同步目录，减少 DLL/权限问题）。
+
+解压后目录应为：
+
+```
+D:\xgb_wav\
+├── src\xgb_wav\...        源码
+├── scripts\build_exe.bat  打包脚本（一键）
+├── scripts\xgb_wav.spec   PyInstaller 配置
+├── models\                训练好的模型（detector.json / xgb_pipeline.joblib / w2v_ckpt.pt / ...）
+├── requirements.txt
+└── docs\BUILD_WINDOWS.md  本文件
+```
+
+## 2. 一键打包
+
+打开 **cmd**（不是 PowerShell 也行，两者都可）：
+
+```bat
+cd /d D:\xgb_wav
+scripts\build_exe.bat
+```
+
+脚本执行 5 个步骤，任何一步失败都会停下并给出原因：
+
+| 步骤 | 内容 | 说明 |
+|---|---|---|
+| 0 | 检查 Python | 必须是 **64 位**，否则直接报错退出 |
+| 1 | 安装依赖 | `pip install torch torchaudio`（CPU 源）→ `-r requirements.txt pyinstaller` |
+| 2 | 检查 `models\` | 5 个必要文件缺一即中止 |
+| 3 | **推理自检** | 先跑一遍 CLI，**能在打包前发现运行环境问题** |
+| 4 | PyInstaller 打包 | 按 `scripts\xgb_wav.spec` 生成 `dist\xgb_wav\` |
+| 5 | 复制 `models\` | 放到 exe 同级目录 |
+
+**耗时参考**：装依赖 5–15 分钟（看网速），打包 3–10 分钟。
+
+可选开关（打包前 `set` 一下）：
+
+```bat
+set SKIP_PIP=1       :: 依赖已装好，跳过第 1 步
+set NO_SELFTEST=1    :: 跳过第 3 步自检
+set CUDA=1           :: 装 CUDA 版 torch（有 NVIDIA 卡想要 GPU 加速时）
+```
+
+## 3. 产物结构
+
+```
+dist\xgb_wav\
+├── xgb_wav.exe        ← 双击运行
+├── _internal\         ← torch / sklearn / numpy 等 DLL（体积主要在这里）
+└── models\            ← 脚本第 5 步自动复制
+    ├── detector.json
+    ├── xgb_pipeline.joblib
+    ├── w2v_ckpt.pt
+    ├── fusion.json
+    └── ref_sweep.wav
+```
+
+> ⚠️ **必须整个 `dist\xgb_wav\` 目录一起拷贝/分发**，只拷 `xgb_wav.exe` 会启动失败。
+> 部署到产线机器时，把这个目录压成一个 zip 拷过去解压即可，**无需安装 Python**。
+
+体积参考：on-dir 模式约 **1.2–2.0 GB**（torch 占大头），属正常现象。
+
+## 4. 验证
+
+1. 双击 `dist\xgb_wav\xgb_wav.exe`，**首次启动等 5–15 秒**（加载 torch），会出现
+   `xgb_wav · 工业音频坏件检测` 窗口。
+2. 「模型目录」应自动填为 `...\dist\xgb_wav\models`，状态栏显示
+   `模型就绪（cpu）· threshold=0.3135 ...`。
+3. 点「选择文件夹」选一批 wav → 「开始检测」→ 结果表格 + 自动导出 CSV。
+4. 打包前也可单独验证运行时（不需要 exe）：
+
+```bat
+set PYTHONPATH=%CD%\src
+python -m xgb_wav.cli --models models --input models\ref_sweep.wav --output test.csv
+```
+
+## 5. 完全离线（重要）
+
+旧版本首次运行会从网上下载 wav2vec2 预训练权重（约 360 MB），产线断网机器会直接失败。
+现在 `models/detector.json` 中记录了 `w2v_arch`（完整网络结构参数），
+程序**在本地按结构构建模型 + 加载自带权重，全程零下载**。
+
+已验证：
+
+```
+TORCH_HOME=<空目录> python -m xgb_wav.cli --models models --input <a folder> --output out.csv
+→ 与联网路径输出逐位相同（score / xgb_proba / w2v_proba 最大差 0.000e+00）
+→ 空缓存目录内无任何文件下载
+```
+
+## 6. 常见问题
+
+| 现象 | 原因 / 处理 |
+|---|---|
+| 启动报 `VCRUNTIME140.dll` / `api-ms-win-crt-*.dll` 缺失 | 装 **VC++ 2015–2022 x64 运行库**（微软官网 `vc_redist.x64.exe`） |
+| 双击毫无反应 | 默认无控制台，看不到报错。临时把 `scripts/xgb_wav.spec` 里 `console=False` 改成 `True` 重新打包，即可看到 traceback |
+| `pip install torch` 太慢/超时 | 换镜像：`python -m pip install torch torchaudio -i https://pypi.tuna.tsinghua.edu.cn/simple` |
+| 有 NVIDIA 显卡想提速 | `set CUDA=1` 后再跑脚本；产线无卡请保持默认 CPU 版（体积小、更稳） |
+| 杀毒软件报毒/拦截 | PyInstaller 产物常被误报，加白名单/排除目录即可 |
+| 打包时报 `models\w2v_ckpt.pt MISSING` | 压缩包没解压完整，或权重被单独移动了，把它放回 `models\` |
+| 中文路径下异常 | 换到 `D:\xgb_wav` 这类纯英文短路径 |
+| 每次启动都很慢 | on-dir 模式启动需加载 torch（5–15 s）；不建议改 onefile（更慢） |
+| 想缩小体积 | 在 spec 的 `excludes` 里追加 `'torch.distributed'`、`'matplotlib'`、`'IPython'`；或蒸馏/换小骨干（不影响本流程） |
+| 想把 models 打进包内 | spec 里取消注释 `datas += [("models", "models")]`（体积 +361 MB，但可单目录分发） |
+
+## 7. 目录里还应带上什么
+
+- `README.md`、`LICENSE`（MIT）
+- `docs/METRICS.md`（指标与阈值说明，便于验收）
+- `configs/production.yaml`（训练/推理参数留档）

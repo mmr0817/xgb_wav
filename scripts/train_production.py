@@ -36,7 +36,7 @@ from xgb_wav.audio import load_for_w2v  # noqa: E402
 from xgb_wav.data import discover_labelled  # noqa: E402
 from xgb_wav.features import XinWeiFeatureConfig  # noqa: E402
 from xgb_wav.featurize import FeatureExtractor  # noqa: E402
-from xgb_wav.model_w2v import Wav2VecClassifier  # noqa: E402
+from xgb_wav.model_w2v import Wav2VecClassifier, wav2vec2_base_arch  # noqa: E402
 from xgb_wav.model_xgb import (  # noqa: E402
     build_params, compute_scale_pos_weight, fit_classifier, make_classifier,
     predict_bad_proba,
@@ -201,6 +201,7 @@ def save_bundle(out: Path, clf, scaler, feat_cfg, w2v, mu_x, sd_x, mu_w, sd_w,
     detector = {"xgb_model": "xgb_pipeline.joblib", "w2v_ckpt": "w2v_ckpt.pt",
                 "fusion": "fusion.json", "ref_sweep": "ref_sweep.wav",
                 "w2v_sample_rate": SR, "w2v_max_duration": MAX_DUR, "w2v_hidden": 256,
+                "w2v_arch": wav2vec2_base_arch(),
                 "batch_size": int(batch_size)}
     (out / "detector.json").write_text(json.dumps(detector, indent=2, ensure_ascii=False),
                                        encoding="utf-8")

@@ -32,6 +32,7 @@ class DetectorConfig:
     w2v_sample_rate: int = 16000
     w2v_max_duration: float = 2.5
     w2v_hidden: int = 256
+    w2v_arch: Optional[dict] = None
     batch_size: int = 32
 
 
@@ -49,7 +50,8 @@ class FusionDetector:
         self.device = device
         self.w2v_model = load_checkpoint(
             cfg.w2v_ckpt, device=device, hidden_size=cfg.w2v_hidden,
-            backbone=str(pack.get("w2v_backbone") or "") or None)
+            backbone=str(pack.get("w2v_backbone") or "") or None,
+            arch=cfg.w2v_arch)
         self.feature_dim = int(pack.get("feature_dim", 0)) or None
 
     # ---------- 构造 ----------
@@ -68,6 +70,7 @@ class FusionDetector:
             w2v_sample_rate=int(meta.get("w2v_sample_rate", 16000)),
             w2v_max_duration=float(meta.get("w2v_max_duration", 2.5)),
             w2v_hidden=int(meta.get("w2v_hidden", 256)),
+            w2v_arch=meta.get("w2v_arch"),
             batch_size=int(meta.get("batch_size", 32)),
         )
         if device == "auto":

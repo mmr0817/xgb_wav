@@ -15,8 +15,47 @@ from .audio import load_for_w2v
 PathLike = Union[str, Path]
 
 
-def load_wav2vec_backbone(checkpoint_path: Optional[str] = None) -> Tuple[nn.Module, int]:
-    """加载 wav2vec2 主干：优先本地 fairseq 权重，否则 torchaudio 预训练。"""
+def wav2vec2_base_arch() -> Optional[dict]:
+    """返回 WAV2VEC2_BASE 的结构参数（纯字典，**不触发权重下载**）。
+
+    torchaudio 的 bundle 把结构参数存在 `_params` 里；少数版本若无该属性，
+    返回 None，调用方退回到 `get_model()`（该路径会联网下载 ~360 MB）。
+    """
+    params = getattr(torchaudio.pipelines.WAV2VEC2_BASE, "_params", None)
+    if not isinstance(params, dict):
+        return None
+    arch = dict(params)
+    conv = arch.get("extractor_conv_layer_config")
+    if conv is not None:
+        arch["extractor_conv_layer_config"] = [tuple(int(v) for v in layer) for layer in conv]
+    return arch
+
+
+def build_backbone_from_arch(arch: dict) -> nn.Module:
+    """按结构参数在本地构建 wav2vec2 主干（完全离线）。"""
+    from torchaudio.models.wav2vec2 import wav2vec2_model
+
+    kwargs = dict(arch)
+    conv = kwargs.get("extractor_conv_layer_config")
+    if conv is not None:
+        kwargs["extractor_conv_layer_config"] = [tuple(int(v) for v in layer) for layer in conv]
+    return wav2vec2_model(**kwargs)
+
+
+def load_wav2vec_backbone(checkpoint_path: Optional[str] = None,
+                          arch: Optional[dict] = None) -> Tuple[nn.Module, int]:
+    """加载 wav2vec2 主干。
+
+    优先级：
+      1) `arch`（detector.json 里记录的结构参数）→ 本地构建，**不联网**；
+      2) 本地 fairseq 权重 → 导入；
+      3) torchaudio bundle 的结构参数 → 本地构建，**不联网**；
+      4) 最后才 `WAV2VEC2_BASE.get_model()`（会联网下载）。
+    离线部署时还会用自有 `w2v_ckpt.pt` 覆盖全部权重，所以 1/3 与 4 数值等价。
+    """
+    if arch:
+        hidden = int(arch.get("encoder_embed_dim", 768))
+        return build_backbone_from_arch(arch), hidden
     if checkpoint_path:
         ckpt = Path(checkpoint_path).expanduser()
         if ckpt.exists():
@@ -28,6 +67,9 @@ def load_wav2vec_backbone(checkpoint_path: Optional[str] = None) -> Tuple[nn.Mod
                 return model, 768
             except Exception as e:  # pragma: no cover
                 print(f"[Warn] 本地 wav2vec 权重加载失败，回退预训练模型: {e}")
+    base_arch = wav2vec2_base_arch()
+    if base_arch is not None:
+        return build_backbone_from_arch(base_arch), int(base_arch.get("encoder_embed_dim", 768))
     return torchaudio.pipelines.WAV2VEC2_BASE.get_model(), 768
 
 
@@ -52,9 +94,10 @@ class Wav2VecClassifier(nn.Module):
     """wav2vec2 帧特征 -> 时间维均值池化 -> MLP 分类。"""
 
     def __init__(self, num_labels: int = 2, hidden_size: int = 256, dropout: float = 0.1,
-                 backbone: Optional[str] = None, freeze_feature_encoder: bool = True):
+                 backbone: Optional[str] = None, freeze_feature_encoder: bool = True,
+                 arch: Optional[dict] = None):
         super().__init__()
-        self.wav2vec2, dim = load_wav2vec_backbone(backbone)
+        self.wav2vec2, dim = load_wav2vec_backbone(backbone, arch)
         if freeze_feature_encoder and hasattr(self.wav2vec2, "feature_extractor"):
             for p in self.wav2vec2.feature_extractor.parameters():
                 p.requires_grad = False
@@ -73,12 +116,14 @@ class Wav2VecClassifier(nn.Module):
 
 def load_checkpoint(path: PathLike, device: Union[str, torch.device] = "cpu",
                     hidden_size: int = 256, dropout: float = 0.1,
-                    backbone: Optional[str] = None) -> Wav2VecClassifier:
+                    backbone: Optional[str] = None,
+                    arch: Optional[dict] = None) -> Wav2VecClassifier:
     """构建模型并加载 state_dict（忽略训练时才有的 buffer，如 class_weight）。"""
     ckpt_path = Path(path).expanduser()
     if not ckpt_path.exists():
         raise FileNotFoundError(f"缺少 wav2vec 权重: {ckpt_path}")
-    model = Wav2VecClassifier(hidden_size=hidden_size, dropout=dropout, backbone=backbone)
+    model = Wav2VecClassifier(hidden_size=hidden_size, dropout=dropout,
+                              backbone=backbone, arch=arch)
     blob = torch.load(str(ckpt_path), map_location="cpu", weights_only=False)
     state = blob.get("model_state_dict", blob) if isinstance(blob, dict) else blob
     missing, unexpected = model.load_state_dict(state, strict=False)
