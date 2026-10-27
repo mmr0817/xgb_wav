@@ -26,3 +26,5 @@ predictions.csv
 .idea/
 .vscode/
 nohup.out
+
+.pytest_cache/
