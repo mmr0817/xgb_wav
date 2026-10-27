@@ -1,0 +1,26 @@
+﻿xgb_wav —— Windows 使用说明（先读我）
+
+【最快路径：3 次双击】
+  1) windows_setup.bat   装依赖 + 自检（只需一次，需联网，约 5-15 分钟）
+  2) run_gui.bat         打开图形界面 - 选 wav 文件夹 - 开始检测 - 自动导出 CSV
+  3) run_cli.bat         命令行批量检测：双击后把 wav 文件夹拖进来回车
+
+出问题先跑  python doctor.py ，会生成 doctor_report.txt，把它发出来即可定位。
+
+【也可以手敲命令】
+  python -m pip install -r requirements.txt
+  python run_gui.py
+  python test.py --input D:\wavs                  :: 只推理，导出 CSV
+  python test.py --data D:\labels --holdout       :: 带 good/bad 标签评测，出指标报表
+
+【打包成 exe】
+  scripts\build_exe.bat
+  产物 dist\xgb_wav\xgb_wav.exe（整个 dist\xgb_wav\ 目录一起分发，只拷 exe 会启动失败）
+  详见 docs\BUILD_WINDOWS.md
+
+【环境要求】
+  Windows 10/11 64 位；Python 3.10~3.12（64 位，安装时勾选 Add python.exe to PATH）
+  磁盘 ≥ 8 GB；不需要显卡；打好的 exe 运行时完全离线
+
+【已内置模型 models\】
+  留出集指标：召回 100%%、误杀 1.7%%（详见 docs\METRICS.md）

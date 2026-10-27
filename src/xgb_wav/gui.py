@@ -17,6 +17,7 @@ import pandas as pd
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from ._console import setup_console
 from .data import discover_wavs
 from .pipeline import FusionDetector
 
@@ -215,6 +216,7 @@ class App(tk.Tk):
 
 
 def main() -> None:
+    setup_console()
     App().mainloop()
 
 

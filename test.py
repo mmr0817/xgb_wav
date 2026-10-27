@@ -44,6 +44,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 
+from xgb_wav._console import setup_console  # noqa: E402
 from xgb_wav.data import discover_labelled, discover_wavs  # noqa: E402
 from xgb_wav.pipeline import FusionDetector  # noqa: E402
 
@@ -295,6 +296,7 @@ def write_report(path: Path, ctx: Dict[str, object], main: Dict[str, float],
 # 主流程
 # --------------------------------------------------------------------------- #
 def main() -> int:
+    setup_console()
     args = parse_args()
     out_dir = Path(args.out_dir).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -9,7 +9,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
+from xgb_wav._console import setup_console  # noqa: E402
 from xgb_wav.gui import main  # noqa: E402
 
 if __name__ == "__main__":
+    setup_console()
     main()
+

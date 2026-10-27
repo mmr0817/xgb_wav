@@ -284,6 +284,9 @@ def run_oof(args, X, y, paths, feat_cfg, device, out: Path, ref: Path) -> None:
 
 
 def main() -> None:
+    from xgb_wav._console import setup_console
+
+    setup_console()
     args = parse_args()
     set_seed(args.seed)
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))

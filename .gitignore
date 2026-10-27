@@ -28,3 +28,4 @@ predictions.csv
 nohup.out
 
 .pytest_cache/
+doctor_report.txt

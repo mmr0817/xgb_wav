@@ -6,6 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
+from ._console import setup_console
 from .data import discover_wavs
 from .pipeline import FusionDetector
 
@@ -22,6 +23,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    setup_console()
     args = parse_args()
     det = FusionDetector.from_dir(args.models, device=args.device)
     print(f"模型目录: {Path(args.models).resolve()}")

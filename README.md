@@ -182,10 +182,24 @@ GUI 冒烟测试会真实创建窗口并模拟「选择文件夹 → 开始检�
 ## 打包 Windows exe
 
 PyInstaller **不支持跨平台交叉编译**，exe 必须在 Windows 上构建。完整图文步骤见
-**[`docs/BUILD_WINDOWS.md`](docs/BUILD_WINDOWS.md)**，TL;DR：
+**[`docs/BUILD_WINDOWS.md`](docs/BUILD_WINDOWS.md)**。
+
+### Windows 快速开始（推荐，全部双击即可）
+
+| 步骤 | 双击 | 作用 |
+|---|---|---|
+| 1 | `windows_setup.bat` | 自动找 Python → 建 `.venv` → 装依赖（失败换清华镜像）→ 跑自检 |
+| 2 | `run_gui.bat` | 打开图形界面（出错时窗口停留，能看到报错） |
+| 3 | `run_cli.bat` | 把 wav 文件夹拖进来回车，批量检测并导出 CSV 到 `outputs\cli\` |
+| 排错 | `python doctor.py` | 生成 `doctor_report.txt`（Python 位数、依赖、控制台编码、模型完整性、端到端推理） |
+
+> 英文版 Windows 的控制台代码页（cp437）无法编码中文，旧版会直接抛
+> `UnicodeEncodeError` 退出。现在所有入口都会把控制台切到 UTF-8 并做
+> `errors="replace"` 兜底，不会再因为一个字符崩掉。
+
+### 打包
 
 ```bat
-:: Windows 10/11 64 位 + Python 3.10~3.12(64bit)，解压到 D:\xgb_wav 后：
 cd /d D:\xgb_wav
 scripts\build_exe.bat
 ```
