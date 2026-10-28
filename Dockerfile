@@ -11,8 +11,8 @@
 #   - 模型权重已打进镜像（models/w2v_ckpt.pt），运行时**完全离线**，不下载任何东西。
 #   - 只提供命令行；图形界面请用 macOS 原生或 Windows x64 的 exe。
 # 基础镜像可覆盖（国内/受限网络可换成自己的镜像源）：
-#   docker build --build-arg BASE_IMAGE=ghcr.io/astral-sh/uv:python3.11-bookworm-slim -t xgb_wav:1.0 .
-ARG BASE_IMAGE=python:3.11-slim
+#   docker build --build-arg BASE_IMAGE=ghcr.io/astral-sh/uv:python3.12-bookworm-slim -t xgb_wav:1.0 .
+ARG BASE_IMAGE=python:3.12-slim
 FROM ${BASE_IMAGE}
 
 ENV PYTHONUNBUFFERED=1 \
@@ -35,19 +35,21 @@ WORKDIR /app
 # ---------- 依赖层（尽量利用缓存）----------
 COPY requirements.txt ./
 ARG TARGETARCH=amd64
-# 顺序很重要：先装 requirements 里除 torch/torchaudio 之外的部分，
-# 最后再装 CPU 版 torch——否则 pip 会把已装的 CPU torch 换成 PyPI 的 CUDA 版，
-# 额外拖进 nvidia_* 依赖（+4 GB）。
-# 注意：这一段不能写 # 注释在续行里（会被 shell 当注释吞掉后半行）。
-RUN grep -viE '^(torch|torchaudio)([[:space:]]*$|[<>=!~])' requirements.txt > /tmp/req-notorch.txt \
- && ls /tmp/req-notorch.txt && cat /tmp/req-notorch.txt \
- && python -m pip install -r /tmp/req-notorch.txt \
+# 顺序与版本都很关键：
+#  1) xgboost 3.4.1 需要 Python >= 3.12（3.11 会退回 3.2.0，而 3.2.0 加载不了
+#     3.4.1 保存的模型）；这里用 --no-deps 安装，避免被拖入 nvidia-nccl（+700MB）。
+#  2) 先装除 torch/torchaudio/xgboost 以外的依赖，最后装 CPU 版 torch，
+#     否则 pip 会用 PyPI 的 CUDA 版 torch 覆盖，额外引入数 GB nvidia_* 依赖。
+RUN grep -viE '^(torch|torchaudio|xgboost)([[:space:]]*$|[<>=!~])' requirements.txt > /tmp/req-base.txt \
+ && cat /tmp/req-base.txt \
+ && python -m pip install -r /tmp/req-base.txt \
+ && python -m pip install --no-deps xgboost==3.4.1 \
  && case "$TARGETARCH" in \
       amd64) IDX="--index-url https://download.pytorch.org/whl/cpu" ;; \
       *)     IDX="" ;; \
     esac \
  && python -m pip install $IDX torch torchaudio \
- && python -c "import torch; print('torch', torch.__version__, 'cuda_available', torch.cuda.is_available())"
+ && python -c "import xgboost, torch; print('xgboost', xgboost.__version__, '| torch', torch.__version__)"
 
 # ---------- 代码与模型 ----------
 COPY src/ ./src/
@@ -57,9 +59,13 @@ COPY models/ ./models/
 COPY README.md LICENSE ./
 
 # 非 root 运行；输出目录给写入权限
+# NUMBA_CACHE_DIR 必须可写：librosa 的 @numba.jit(cache=True) 会在导入时报
+# "cannot cache function ... no locator available"（用 -u 覆盖用户时尤其明显）
 RUN useradd -m -u 10001 appuser \
- && mkdir -p /out \
+ && mkdir -p /out /tmp/numba \
+ && chmod 1777 /tmp/numba \
  && chown -R appuser:appuser /app /out
+ENV NUMBA_CACHE_DIR=/tmp/numba
 USER appuser
 
 VOLUME ["/data", "/out"]

@@ -2,7 +2,9 @@
 numpy>=1.24
 scipy>=1.10
 scikit-learn>=1.3
-xgboost>=2.0
+# 必须与训练环境一致：3.4.1 保存的模型无法被 3.2.0 加载
+# （xgboost 3.4.1 要求 Python >= 3.12；Python 3.11 只能装到 3.2.0，会加载失败）
+xgboost==3.4.1
 librosa>=0.10
 soundfile>=0.12
 joblib>=1.3

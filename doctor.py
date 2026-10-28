@@ -78,8 +78,10 @@ def main() -> int:
             if not os.environ.get("DISPLAY"):
                 say("  WARN  无 DISPLAY：无桌面环境下无法开窗口（用 test.py 做命令行推理）")
     except Exception as e:
-        say(f"  FAIL  tkinter 不可用: {e}")
-        FAILED.append("tkinter 不可用（重装 Python 时勾选 tcl/tk）")
+        # 容器/精简环境没有 tkinter 属正常：命令行不受影响，只影响 GUI
+        say(f"  WARN  tkinter 不可用: {e}")
+        say("        （Docker/精简环境正常，命令行检测不受影响；"
+            "要 GUI 请用 python.org 安装包或 Windows exe）")
 
     # ---------- 4. 模型文件 ----------
     section("[4] 模型文件 models/")
@@ -96,6 +98,32 @@ def main() -> int:
             say(f"  {flag}  {fn:<22} {size / 1024 / 1024:.1f} MB")
             if size < min_size:
                 FAILED.append(f"models/{fn} 体积异常（可能没解压完整）")
+
+    # ---------- 4b. xgboost 版本一致性（模型由 3.4.1 保存）----------
+    try:
+        import json as _json
+
+        import joblib
+
+        pack = joblib.load(REPO / "models" / "xgb_pipeline.joblib")
+        mv = tuple(int(v) for v in _json.loads(
+            pack["model"].get_booster().save_config())["version"])
+        say(f"  模型版本 : xgboost {mv}")
+        try:
+            import xgboost
+
+            lib = tuple(int(x) for x in xgboost.__version__.split("+")[0].split(".")[:3])
+            say(f"  库版本   : xgboost {xgboost.__version__}")
+            if lib < mv:
+                say("  FAIL  xgboost 版本低于模型版本")
+                FAILED.append(
+                    f'xgboost 版本过低（{xgboost.__version__} < {mv}）：'
+                    f'pip install "xgboost==3.4.1"（该版本要求 Python >= 3.12）')
+        except ImportError:
+            FAILED.append("xgboost 未安装：pip install -r requirements.txt")
+    except Exception as e:
+        say(f"  FAIL  加载 xgb_pipeline.joblib 失败: {type(e).__name__}: {e}")
+        FAILED.append('xgboost 版本不匹配，先执行 pip install "xgboost==3.4.1"（需 Python 3.12+）')
 
     # ---------- 5. 端到端 ----------
     section("[5] 端到端推理自检（models/ref_sweep.wav）")

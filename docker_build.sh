@@ -18,5 +18,7 @@ echo "== 构建 $IMAGE（首次约 5-15 分钟）"
 docker build -t "$IMAGE" .
 
 echo
-echo "== 完成。试跑："
-echo "  docker run --rm -v \"\$PWD/data:/data\" -v \"\$PWD/outputs:/out\" $IMAGE --input /data --out-dir /out"
+echo "== 完成。试跑（Linux 需带 -u，Windows/macOS 可去掉）："
+echo "  docker run --rm -u \"\$(id -u):\$(id -g)\" \\"
+echo "    -v \"\$PWD/data:/data\" -v \"\$PWD/outputs:/out\" \\"
+echo "    $IMAGE --input /data --out-dir /out"

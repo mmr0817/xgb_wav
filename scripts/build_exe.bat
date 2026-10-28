@@ -27,12 +27,13 @@ REM ---------- 0) Python ----------
 where python >nul 2>nul
 if errorlevel 1 (
     echo [ERROR] python not found in PATH.
-    echo         Install Python 3.10-3.12 ^(64-bit^) and tick "Add to PATH".
+    echo         Install Python 3.12+ ^(64-bit^) and tick "Add to PATH".
     goto :err
 )
-python -c "import sys; print('[0/5] Python', sys.version.split()[0], '64bit' if sys.maxsize>2**32 else '32bit'); sys.exit(0 if sys.maxsize>2**32 else 1)"
+python -c "import sys; print('[0/5] Python', sys.version.split()[0], '64bit' if sys.maxsize>2**32 else '32bit'); sys.exit(0 if (sys.version_info>=(3,12) and sys.maxsize>2**32) else 1)"
 if errorlevel 1 (
-    echo [ERROR] 64-bit Python is required.
+    echo [ERROR] 64-bit Python 3.12+ is required.
+    echo         xgboost==3.4.1 needs Python ^>= 3.12; 3.11 would install 3.2.0 and fail to load the model.
     goto :err
 )
 

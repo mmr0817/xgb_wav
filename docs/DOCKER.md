@@ -12,7 +12,7 @@
 | Windows ARM64 装不上 torch | 容器是 **Linux**，torch 有 `linux/arm64` 轮子 |
 | 装依赖要 2–3 GB、还常失败 | 依赖全在镜像里，一条 `docker run` 即可 |
 | 产线机器断网 | 模型权重已打进镜像，运行期**零下载** |
-| 不同电脑环境不一致 | 镜像固定 Python 3.11 + 固定依赖版本 |
+| 不同电脑环境不一致 | 镜像固定 Python 3.12 + 固定依赖版本 |
 
 > 容器只提供**命令行**（输出 CSV / 指标报表）。图形界面请用
 > macOS 原生 `python run_gui.py` 或 Windows x64 的 `xgb_wav.exe`。
@@ -83,8 +83,8 @@ docker build -t xgb_wav:1.0 .
 bash docker_build.sh
 ```
 
-- 镜像约 **2.3 GB**（含 361 MB 权重），首次构建 5–15 分钟。
-- 需要能访问 Docker Hub（拉 `python:3.11-slim`）。国内网络请在 Docker Desktop →
+- 镜像约 **3.9 GB**（实测；torch 769 MB + llvmlite 173 MB + 模型权重 362 MB），首次构建 10–20 分钟。
+- 需要能访问 Docker Hub（拉 `python:3.12-slim`）。国内网络请在 Docker Desktop →
   Settings → Docker Engine 里加 registry mirror，例如：
 
 ```json
@@ -96,7 +96,7 @@ bash docker_build.sh
 - 也可以直接换基础镜像（不需要改 Dockerfile）：
 
 ```bash
-docker build --build-arg BASE_IMAGE=ghcr.io/astral-sh/uv:python3.11-bookworm-slim \
+docker build --build-arg BASE_IMAGE=ghcr.io/astral-sh/uv:python3.12-bookworm-slim \
              -t xgb_wav:1.0 .
 ```
 
@@ -126,18 +126,31 @@ docker build --build-arg BASE_IMAGE=ghcr.io/astral-sh/uv:python3.11-bookworm-sli
 | 输出目录先建好 | 宿主机 `outputs\` 不存在时 Docker 会建目录但**属主是 root**，Windows 下一般无感 |
 | 中文/空格路径 | 可用，但建议英文短路径（`D:\wavs`），避免转义麻烦 |
 | 只读挂载输入 | 想更安全可加 `:ro`：`-v "D:\wavs:/data:ro"` |
+| **Linux 宿主机** | 容器内是 uid 10001，若 `outputs/` 属主不是你，会报 `Permission denied`；加 `-u $(id -u):$(id -g)` 即可（Windows/macOS 无需） |
 
-## 6. 性能参考
+## 6. 性能参考（镜像内实测）
 
-本机实测（20 核 x86_64，**纯 CPU，容器内同样走 CPU**）：
+`docker run` 在 x86_64、4 线程下的实测值（8 条 8 kHz wav）：
 
 | 项目 | 数值 |
 |---|---|
-| 模型加载（首次进进程） | 1–2 s |
-| 单条推理 | **约 100 ms/条**（8 条 0.8 s） |
-| 满载建议 | 一次传一个文件夹，几千条几分钟内跑完 |
+| 容器启动 + 模型加载 + 8 条推理 | **5.0 s**（其中推理 2.8 s） |
+| 单条推理 | **约 350 ms/条** |
+| 镜像体积 | **3.84 GB**（torch 769 MB、llvmlite 173 MB、权重 362 MB） |
 
-ARM64 容器（Apple Silicon / Windows on ARM）没有 MKL 优化，通常比 x86 慢 2–4 倍，实测为准。
+> 同机用 CUDA 版 torch（`--device cpu`）实测约 100 ms/条；容器内是纯 CPU wheel，
+> 没有 MKL 加速，慢 3 倍左右。调大 `OMP_NUM_THREADS` 提升很小（实测 346 ms）。
+> 产线按 ~3 条/秒 估算即可；几千条几分钟跑完。
+
+ARM64 容器（Apple Silicon / Windows on ARM）通常再慢 2–4 倍，实测为准。
+
+## 6b. 容器内自检（可选）
+
+```bash
+docker run --rm --entrypoint python xgb_wav:1.0 doctor.py
+```
+
+实测输出：Python 3.12.12 / xgboost 3.4.1（模型版本 3.4.1）/ 端到端推理成功 / 全部检查通过。
 
 ## 7. 常见问题
 

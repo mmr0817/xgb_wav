@@ -1,7 +1,7 @@
 @echo off
 REM ============================================================
 REM  xgb_wav  Windows 一键安装（双击运行）
-REM    1) 找到 Python(64 位, >=3.10)
+REM    1) 找到 Python(64 位, >=3.12)
 REM    2) 创建 .venv 虚拟环境
 REM    3) 安装依赖（失败自动换清华镜像重试）
 REM    4) 运行 doctor.py 自检
@@ -24,7 +24,7 @@ if not defined PY (
 )
 if not defined PY goto :nopython
 
-%PY% -c "import sys; print('[0] Python', sys.version.split()[0], '64bit' if sys.maxsize>2**32 else '32bit'); sys.exit(0 if (sys.version_info>=(3,10) and sys.maxsize>2**32) else 1)"
+%PY% -c "import sys; print('[0] Python', sys.version.split()[0], '64bit' if sys.maxsize>2**32 else '32bit'); sys.exit(0 if (sys.version_info>=(3,12) and sys.maxsize>2**32) else 1)"
 if errorlevel 1 goto :badpython
 
 echo [1/4] create venv .venv ...
@@ -71,7 +71,7 @@ exit /b 0
 :nopython
 echo.
 echo [ERROR] Python not found in PATH.
-echo   Install Python 3.10-3.12 (64-bit):
+echo   Install Python 3.12 or 3.13 (64-bit):
 echo     https://www.python.org/downloads/windows/
 echo   During install TICK:  Add python.exe to PATH
 pause
@@ -79,7 +79,7 @@ exit /b 1
 
 :badpython
 echo.
-echo [ERROR] Need 64-bit Python 3.10 or newer.
+echo [ERROR] Need 64-bit Python 3.12 or newer.
 pause
 exit /b 1
 

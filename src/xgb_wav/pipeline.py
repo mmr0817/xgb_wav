@@ -41,7 +41,20 @@ class FusionDetector:
 
     def __init__(self, cfg: DetectorConfig, device: str = "cpu"):
         self.cfg = cfg
-        pack = joblib.load(cfg.xgb_model)
+        try:
+            pack = joblib.load(cfg.xgb_model)
+        except Exception as e:  # 常见：xgboost 版本低于训练版本
+            try:
+                import xgboost
+
+                cur = xgboost.__version__
+            except Exception:  # pragma: no cover
+                cur = "未安装"
+            raise RuntimeError(
+                f"加载 XGB 模型失败：{e}\n"
+                f"最常见原因：xgboost 版本低于训练版本（当前 {cur}，需要 3.4.1，"
+                f"且 3.4.1 要求 Python >= 3.12）。\n"
+                f"修复：python -m pip install \"xgboost==3.4.1\"") from e
         self.xgb_model = pack["model"]
         self.scaler = pack["scaler"]
         self.feat_cfg = cfg.feat_cfg or XinWeiFeatureConfig(**pack.get("feat_cfg", {}))

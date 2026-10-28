@@ -21,7 +21,7 @@ exit /b 0
 :nopy
 echo.
 echo [ERROR] Python not found.
-echo         Run windows_setup.bat first, or install Python 3.10-3.12 64-bit
+echo         Run windows_setup.bat first, or install Python 3.12+ 64-bit
 echo         from https://www.python.org/downloads/windows/ and tick Add to PATH.
 pause
 exit /b 1
