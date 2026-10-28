@@ -99,6 +99,8 @@ echo     winget install -e --id Python.Python.3.12
 echo     or https://www.python.org/downloads/windows/   ^(tick "Add python.exe to PATH"^)
 echo.
 echo   You do NOT need to uninstall your existing 3.10 - py -3.13 / py -3.12 is used first.
+echo.
+echo   Or simply double-click  install_python312.bat  in the repo root.
 pause
 exit /b 1
 

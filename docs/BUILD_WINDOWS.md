@@ -28,6 +28,16 @@ python -c "import sys, platform; print(sys.version, sys.maxsize > 2**32, platfor
 `platform.machine()` 必须是 `AMD64`；若显示 `ARM64`，请换 x64 Windows 或直接用
 GitHub Actions 构建。
 
+### 只有 Python 3.10 / 3.11？双击 `install_python312.bat`
+
+它会依次尝试：
+
+1. `winget install -e --id Python.Python.3.12 --scope user --silent`
+2. 失败则从 python.org 下载 `python-3.12.10-amd64.exe` 并静默安装（per-user、自动加 PATH、带 py launcher）
+
+装完**新开一个 cmd**，`py -0` 应出现 `-3.12-64`，再跑 `scripts\build_exe.bat` 即可。
+原有的 3.10 不会被卸载或改动。
+
 ## 1. 解压到短路径
 
 推荐 `D:\xgb_wav`（**避免**中文路径、空格、OneDrive 同步目录，减少 DLL/权限问题）。

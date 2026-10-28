@@ -152,6 +152,8 @@ echo   Install 3.12 or newer, then run this script again:
 echo     winget install -e --id Python.Python.3.12
 echo     or https://www.python.org/downloads/windows/   ^(tick "Add python.exe to PATH"^)
 echo.
+echo   Or simply double-click  install_python312.bat  in the repo root.
+echo.
 echo   You do NOT need to uninstall 3.10 - this script prefers py -3.13 / py -3.12.
 echo   Alternative: use the Docker image ^(windows_setup.bat is not required^).
 echo.
