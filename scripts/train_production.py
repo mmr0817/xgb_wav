@@ -178,9 +178,14 @@ def save_bundle(out: Path, clf, scaler, feat_cfg, w2v, mu_x, sd_x, mu_w, sd_w,
                 thr, margin, metrics, n_train, batch_size, extra=None) -> None:
     import joblib
 
+    from xgb_wav.model_xgb import export_portable
+
     joblib.dump({"model": clf, "scaler": scaler, "feat_cfg": feat_cfg.__dict__,
                  "feature_dim": int(scaler.n_features_in_), "n_train": int(n_train)},
                 out / "xgb_pipeline.joblib")
+    # 同时导出可移植格式（Windows / 跨 xgboost 版本更稳，见 docs/MODEL_FORMAT.md）
+    portable = export_portable(out, clf, scaler, feat_cfg.__dict__,
+                               int(scaler.n_features_in_))
     torch.save({"model_state_dict": w2v.state_dict(),
                 "config": {"num_labels": 2, "hidden_size": 256, "dropout": 0.1,
                            "sample_rate": SR, "max_duration": MAX_DUR,
@@ -203,6 +208,7 @@ def save_bundle(out: Path, clf, scaler, feat_cfg, w2v, mu_x, sd_x, mu_w, sd_w,
                 "w2v_sample_rate": SR, "w2v_max_duration": MAX_DUR, "w2v_hidden": 256,
                 "w2v_arch": wav2vec2_base_arch(),
                 "batch_size": int(batch_size)}
+    detector.update(portable)
     (out / "detector.json").write_text(json.dumps(detector, indent=2, ensure_ascii=False),
                                        encoding="utf-8")
 

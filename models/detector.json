@@ -60,5 +60,7 @@
     "encoder_layer_norm_first": false,
     "encoder_layer_drop": 0.05,
     "aux_num_out": null
-  }
+  },
+  "xgb_model_ubj": "xgb_model.ubj",
+  "xgb_scaler": "xgb_scaler.json"
 }

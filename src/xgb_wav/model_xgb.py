@@ -97,6 +97,9 @@ def predict_bad_proba(clf, X: np.ndarray, use_best_iteration: bool = True) -> np
     X = np.asarray(X)
     if X.shape[0] == 0:
         return np.zeros(0, dtype=np.float64)
+    if _xgb is not None and isinstance(clf, _xgb.Booster):
+        # 原生 Booster（来自 xgb_model.ubj）：不需要 sklearn 包装层
+        return np.asarray(clf.predict(_xgb.DMatrix(X)), dtype=np.float64)
     if hasattr(clf, "predict_bad_proba"):
         return np.asarray(clf.predict_bad_proba(X), dtype=np.float64)
     bi = best_iteration_or_none(clf) if use_best_iteration else None
@@ -108,6 +111,55 @@ def predict_bad_proba(clf, X: np.ndarray, use_best_iteration: bool = True) -> np
     else:
         proba = clf.predict_proba(X)
     return np.asarray(proba)[:, 1]
+
+
+def scaler_to_json(scaler, feat_cfg: dict, feature_dim: int) -> Dict[str, Any]:
+    """StandardScaler -> 纯 JSON（不依赖 pickle，跨平台可读）。"""
+    return {
+        "kind": "StandardScaler",
+        "mean": np.asarray(scaler.mean_, dtype=np.float64).tolist(),
+        "scale": np.asarray(scaler.scale_, dtype=np.float64).tolist(),
+        "var": np.asarray(getattr(scaler, "var_", []), dtype=np.float64).tolist(),
+        "n_features_in": int(getattr(scaler, "n_features_in_", feature_dim)),
+        "with_mean": bool(getattr(scaler, "with_mean", True)),
+        "with_std": bool(getattr(scaler, "with_std", True)),
+        "feat_cfg": dict(feat_cfg or {}),
+        "feature_dim": int(feature_dim),
+    }
+
+
+def scaler_from_json(meta: Dict[str, Any]):
+    """从 scaler_to_json 的字典重建 StandardScaler。"""
+    from sklearn.preprocessing import StandardScaler
+
+    sc = StandardScaler()
+    sc.mean_ = np.asarray(meta["mean"], dtype=np.float64)
+    sc.scale_ = np.asarray(meta["scale"], dtype=np.float64)
+    var = meta.get("var")
+    sc.var_ = np.asarray(var, dtype=np.float64) if var else np.square(sc.scale_)
+    sc.n_features_in_ = int(meta.get("n_features_in", sc.mean_.shape[0]))
+    sc.with_mean = bool(meta.get("with_mean", True))
+    sc.with_std = bool(meta.get("with_std", True))
+    return sc
+
+
+def export_portable(out_dir, clf, scaler, feat_cfg: dict, feature_dim: int) -> Dict[str, str]:
+    """导出可移植产物：xgb_model.ubj + xgb_scaler.json（返回文件名映射）。
+
+    相比 joblib/pickle，UBJ 是 XGBoost 官方格式，跨平台/跨版本最稳，
+    可以避免 Windows 上 `input stream corrupted` 这类反序列化问题。
+    """
+    import json
+    from pathlib import Path
+
+    out = Path(out_dir)
+    booster = clf.get_booster() if hasattr(clf, "get_booster") else clf
+    ubj = out / "xgb_model.ubj"
+    js = out / "xgb_scaler.json"
+    booster.save_model(str(ubj))
+    js.write_text(json.dumps(scaler_to_json(scaler, feat_cfg, feature_dim),
+                             indent=2, ensure_ascii=False), encoding="utf-8")
+    return {"xgb_model_ubj": ubj.name, "xgb_scaler": js.name}
 
 
 class EnsembleModel:

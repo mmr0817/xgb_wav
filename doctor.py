@@ -99,31 +99,35 @@ def main() -> int:
             if size < min_size:
                 FAILED.append(f"models/{fn} 体积异常（可能没解压完整）")
 
-    # ---------- 4b. xgboost 版本一致性（模型由 3.4.1 保存）----------
+    # ---------- 4b. XGB 模型格式与版本 ----------
     try:
         import json as _json
 
-        import joblib
+        import xgboost
 
-        pack = joblib.load(REPO / "models" / "xgb_pipeline.joblib")
-        mv = tuple(int(v) for v in _json.loads(
-            pack["model"].get_booster().save_config())["version"])
+        ubj = REPO / "models" / "xgb_model.ubj"
+        if ubj.exists():
+            booster = xgboost.Booster(model_file=str(ubj))
+            say("  模型文件 : xgb_model.ubj（官方可移植格式，推荐）")
+        else:
+            import joblib
+
+            pack = joblib.load(REPO / "models" / "xgb_pipeline.joblib")
+            booster = pack["model"].get_booster()
+            say("  模型文件 : xgb_pipeline.joblib（pickle，跨平台有风险）")
+        mv = tuple(int(v) for v in _json.loads(booster.save_config())["version"])
         say(f"  模型版本 : xgboost {mv}")
-        try:
-            import xgboost
-
-            lib = tuple(int(x) for x in xgboost.__version__.split("+")[0].split(".")[:3])
-            say(f"  库版本   : xgboost {xgboost.__version__}")
-            if lib < mv:
-                say("  FAIL  xgboost 版本低于模型版本")
-                FAILED.append(
-                    f'xgboost 版本过低（{xgboost.__version__} < {mv}）：'
-                    f'pip install "xgboost==3.4.1"（该版本要求 Python >= 3.12）')
-        except ImportError:
-            FAILED.append("xgboost 未安装：pip install -r requirements.txt")
+        lib = tuple(int(x) for x in xgboost.__version__.split("+")[0].split(".")[:3])
+        say(f"  库版本   : xgboost {xgboost.__version__}")
+        if lib < mv:
+            say("  FAIL  xgboost 版本低于模型版本")
+            FAILED.append(
+                f'xgboost 版本过低（{xgboost.__version__} < {mv}）：'
+                f'pip install "xgboost==3.4.1"（该版本要求 Python >= 3.12）')
     except Exception as e:
-        say(f"  FAIL  加载 xgb_pipeline.joblib 失败: {type(e).__name__}: {e}")
-        FAILED.append('xgboost 版本不匹配，先执行 pip install "xgboost==3.4.1"（需 Python 3.12+）')
+        say(f"  FAIL  读取 XGB 模型失败: {type(e).__name__}: {e}")
+        FAILED.append('XGB 模型读取失败：pip install "xgboost==3.4.1"（需 Python 3.12+）；'
+                      '或确认 models\\xgb_model.ubj 存在')
 
     # ---------- 5. 端到端 ----------
     section("[5] 端到端推理自检（models/ref_sweep.wav）")

@@ -22,12 +22,22 @@ from .model_w2v import load_checkpoint, predict_proba as w2v_predict
 PathLike = Union[str, Path]
 
 
+def _load_scaler_from_json(path: PathLike):
+    """从 xgb_scaler.json 重建 StandardScaler（避免 pickle 跨平台问题）。"""
+    from .model_xgb import scaler_from_json
+
+    meta = json.loads(Path(path).read_text(encoding="utf-8"))
+    return scaler_from_json(meta), meta
+
+
 @dataclass
 class DetectorConfig:
     xgb_model: Path
     w2v_ckpt: Path
     fusion: Path
     ref_sweep: Optional[Path] = None
+    xgb_ubj: Optional[Path] = None
+    xgb_scaler: Optional[Path] = None
     feat_cfg: Optional[XinWeiFeatureConfig] = None
     w2v_sample_rate: int = 16000
     w2v_max_duration: float = 2.5
@@ -41,23 +51,43 @@ class FusionDetector:
 
     def __init__(self, cfg: DetectorConfig, device: str = "cpu"):
         self.cfg = cfg
-        try:
-            pack = joblib.load(cfg.xgb_model)
-        except Exception as e:  # 常见：xgboost 版本低于训练版本
-            try:
-                import xgboost
+        model_dir = Path(cfg.xgb_model).parent
+        ubj = Path(cfg.xgb_ubj) if cfg.xgb_ubj else (model_dir / "xgb_model.ubj")
+        scl = Path(cfg.xgb_scaler) if cfg.xgb_scaler else (model_dir / "xgb_scaler.json")
 
-                cur = xgboost.__version__
-            except Exception:  # pragma: no cover
-                cur = "未安装"
-            raise RuntimeError(
-                f"加载 XGB 模型失败：{e}\n"
-                f"最常见原因：xgboost 版本低于训练版本（当前 {cur}，需要 3.4.1，"
-                f"且 3.4.1 要求 Python >= 3.12）。\n"
-                f"修复：python -m pip install \"xgboost==3.4.1\"") from e
-        self.xgb_model = pack["model"]
-        self.scaler = pack["scaler"]
-        self.feat_cfg = cfg.feat_cfg or XinWeiFeatureConfig(**pack.get("feat_cfg", {}))
+        pack: dict = {}
+        if ubj.exists() and scl.exists():
+            # 首选：XGBoost 原生 UBJ + JSON 标量参数
+            # （跨平台/跨版本最稳，完全不走 pickle，可避免 Windows 上的
+            #   XGBoostError: input stream corrupted）
+            import xgboost as xgb
+
+            self.xgb_model = xgb.Booster(model_file=str(ubj))
+            self.scaler, smeta = _load_scaler_from_json(scl)
+            self.feat_cfg = cfg.feat_cfg or XinWeiFeatureConfig(**smeta.get("feat_cfg", {}))
+            self.feature_dim = int(smeta.get("feature_dim") or 0) or None
+            self.xgb_source = "ubj"
+        else:
+            try:
+                pack = joblib.load(cfg.xgb_model)
+            except Exception as e:  # 常见：xgboost 版本低于训练版本
+                try:
+                    import xgboost
+
+                    cur = xgboost.__version__
+                except Exception:  # pragma: no cover
+                    cur = "未安装"
+                raise RuntimeError(
+                    f"加载 XGB 模型失败：{e}\n"
+                    f"最常见原因：xgboost 版本低于训练版本（当前 {cur}，需要 3.4.1，"
+                    f"且 3.4.1 要求 Python >= 3.12）。\n"
+                    f"修复：python -m pip install \"xgboost==3.4.1\"") from e
+            self.xgb_model = pack["model"]
+            self.scaler = pack["scaler"]
+            self.feat_cfg = cfg.feat_cfg or XinWeiFeatureConfig(**pack.get("feat_cfg", {}))
+            self.feature_dim = int(pack.get("feature_dim", 0)) or None
+            self.xgb_source = "joblib"
+
         self.rule = FusionRule.from_json(cfg.fusion)
         self.extractor = FeatureExtractor(self.feat_cfg, cfg.ref_sweep)
         self.device = device
@@ -65,7 +95,6 @@ class FusionDetector:
             cfg.w2v_ckpt, device=device, hidden_size=cfg.w2v_hidden,
             backbone=str(pack.get("w2v_backbone") or "") or None,
             arch=cfg.w2v_arch)
-        self.feature_dim = int(pack.get("feature_dim", 0)) or None
 
     # ---------- 构造 ----------
     @classmethod
@@ -80,6 +109,8 @@ class FusionDetector:
             w2v_ckpt=model_dir / meta["w2v_ckpt"],
             fusion=model_dir / meta["fusion"],
             ref_sweep=(model_dir / meta["ref_sweep"]) if meta.get("ref_sweep") else None,
+            xgb_ubj=(model_dir / meta["xgb_model_ubj"]) if meta.get("xgb_model_ubj") else None,
+            xgb_scaler=(model_dir / meta["xgb_scaler"]) if meta.get("xgb_scaler") else None,
             w2v_sample_rate=int(meta.get("w2v_sample_rate", 16000)),
             w2v_max_duration=float(meta.get("w2v_max_duration", 2.5)),
             w2v_hidden=int(meta.get("w2v_hidden", 256)),
