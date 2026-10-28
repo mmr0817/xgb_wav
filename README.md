@@ -228,6 +228,25 @@ scripts\build_exe.bat
 常用开关：`set SKIP_PIP=1`（跳过装依赖）、`set NO_SELFTEST=1`（跳过自检）、
 `set CUDA=1`（有 NVIDIA 卡时装 CUDA 版 torch）。
 
+## Docker（推荐：ARM64 Windows 也能跑）
+
+> Linux 容器里的 PyTorch 同时有 amd64/arm64 轮子，**绕开「Windows ARM64 装不上 torch」的问题**。
+> 镜像含权重，运行期完全离线；只提供命令行（GUI 用 macOS 原生或 Windows exe）。
+
+```bash
+docker pull ghcr.io/mmr0817/xgb_wav:latest
+docker run --rm -v "D:/wavs:/data" -v "$PWD/outputs:/out" \
+  ghcr.io/mmr0817/xgb_wav:latest --input /data --out-dir /out
+```
+
+| 需求 | 用哪个 |
+|---|---|
+| 一键跑（Windows/macOS，含 ARM） | `docker_run.bat`（拖入 wav 文件夹）/ `docker run ...` |
+| 自己构建镜像 | `docker_build.bat`（Windows）/ `bash docker_build.sh` |
+| 详细说明（挂载、镜像加速、GHCR 权限、性能） | [`docs/DOCKER.md`](docs/DOCKER.md) |
+
+镜像约 2.3 GB（含 361 MB 权重）；纯 CPU 约 100 ms/条。
+
 ## 模型与阈值说明
 
 - **为什么不直接输出概率**：两路模型概率尺度不同，融合前各自做 logit 标准化；

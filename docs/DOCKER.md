@@ -1,0 +1,167 @@
+# Docker 部署（Windows / macOS / Linux）
+
+> **一句话**：把「Python + PyTorch + 模型」全部封进一个 Linux 镜像，
+> 宿主机什么都不用装。**Windows ARM64（Apple Silicon 上的 Parallels）也能跑**，
+> 因为 Linux 容器里的 torch 同时提供 amd64 与 arm64 轮子——这正好绕开
+> 「PyTorch 没有 Windows ARM64 轮子」的死结。
+
+## 0. 为什么用 Docker
+
+| 痛点 | Docker 怎么解决 |
+|---|---|
+| Windows ARM64 装不上 torch | 容器是 **Linux**，torch 有 `linux/arm64` 轮子 |
+| 装依赖要 2–3 GB、还常失败 | 依赖全在镜像里，一条 `docker run` 即可 |
+| 产线机器断网 | 模型权重已打进镜像，运行期**零下载** |
+| 不同电脑环境不一致 | 镜像固定 Python 3.11 + 固定依赖版本 |
+
+> 容器只提供**命令行**（输出 CSV / 指标报表）。图形界面请用
+> macOS 原生 `python run_gui.py` 或 Windows x64 的 `xgb_wav.exe`。
+
+## 1. 装 Docker Desktop（Windows）
+
+1. 下载 <https://www.docker.com/products/docker-desktop/> 安装（Win10/11 64 位）。
+2. 首次启动会装 **WSL2** 后端，按提示重启一次。
+3. 托盘出现小鲸鱼图标且**不再动画**，说明引擎就绪。
+4. Settings → Resources → File sharing：勾上你要挂载的盘符（如 `D:`）。
+
+> Apple Silicon 的 Mac 上装的是 Docker Desktop for Mac，跑的是 **linux/arm64** 容器，同样可用。
+
+## 2. 方式 A（推荐）：拉现成镜像
+
+镜像由 GitHub Actions 在 x64+arm64 上构建，自动按你的机器架构选择：
+
+```bash
+docker pull ghcr.io/mmr0817/xgb_wav:latest
+```
+
+> 若提示 `denied`：打开 GitHub → 你的头像 → **Packages** → `xgb_wav`
+> → *Package settings* → *Change visibility* → **Public**（或用
+> `docker login ghcr.io -u mmr0817` 登录一次）。
+
+### 跑一次检测
+
+Windows **cmd**：
+
+```bat
+mkdir outputs
+docker run --rm -v "D:\wavs:/data" -v "%CD%\outputs:/out" ^
+  ghcr.io/mmr0817/xgb_wav:latest --input /data --out-dir /out
+```
+
+PowerShell（注意 `${PWD}`）：
+
+```powershell
+docker run --rm -v "D:\wavs:/data" -v "${PWD}\outputs:/out" `
+  ghcr.io/mmr0817/xgb_wav:latest --input /data --out-dir /out
+```
+
+macOS / Linux：
+
+```bash
+mkdir -p outputs
+docker run --rm -v "$PWD/data:/data" -v "$PWD/outputs:/out" \
+  ghcr.io/mmr0817/xgb_wav:latest --input /data --out-dir /out
+```
+
+结果：`outputs/predictions.csv`（+ `REPORT.md` 若做了带标签评测）。
+
+### 或者双击脚本
+
+`docker_run.bat`：双击 → 把 wav 文件夹拖进窗口 → 回车，结果落在 `outputs\`。
+（默认用 `xgb_wav:1.0`；想用 GHCR 镜像就把它里面的 `set "IMAGE=..."` 改成
+`ghcr.io/mmr0817/xgb_wav:latest`）
+
+## 3. 方式 B：本地构建
+
+```bat
+:: Windows：双击 docker_build.bat，或
+docker build -t xgb_wav:1.0 .
+```
+
+```bash
+# macOS / Linux
+bash docker_build.sh
+```
+
+- 镜像约 **2.3 GB**（含 361 MB 权重），首次构建 5–15 分钟。
+- 需要能访问 Docker Hub（拉 `python:3.11-slim`）。国内网络请在 Docker Desktop →
+  Settings → Docker Engine 里加 registry mirror，例如：
+
+```json
+{
+  "registry-mirrors": ["https://docker.m.daocloud.io"]
+}
+```
+
+- 也可以直接换基础镜像（不需要改 Dockerfile）：
+
+```bash
+docker build --build-arg BASE_IMAGE=ghcr.io/astral-sh/uv:python3.11-bookworm-slim \
+             -t xgb_wav:1.0 .
+```
+
+- 构建时 amd64 会自动走 PyTorch 官方 CPU 源（`download.pytorch.org/whl/cpu`，约 196 MB），
+  arm64 走 PyPI 的 CPU 轮子；两者都不需要显卡。
+
+
+## 4. 常用用法
+
+| 场景 | 命令（IMAGE = `ghcr.io/mmr0817/xgb_wav:latest` 或 `xgb_wav:1.0`） |
+|---|---|
+| 整个目录 | `docker run --rm -v "D:\wavs:/data" -v "%CD%\outputs:/out" IMAGE --input /data --out-dir /out` |
+| 单个文件 | `--input /data/xxx.wav --out-dir /out` |
+| 带标签评测（指标+阈值扫描） | `--data /data --holdout --sweep --out-dir /out`（`/data` 下需有 `good/`、`bad/`） |
+| 临时改阈值 | 追加 `--threshold 0.5` |
+| 环境自检 | `docker run --rm --entrypoint python IMAGE doctor.py` |
+| 看帮助 | `docker run --rm IMAGE --help` |
+| 交互式 shell | `docker run --rm -it --entrypoint bash IMAGE` |
+| 用 GPU | 不支持（镜像为 CPU 版，产线也不需要） |
+
+## 5. 卷挂载（Windows 必看）
+
+| 规则 | 说明 |
+|---|---|
+| 用**绝对路径** | `-v "D:\wavs:/data"` ✅ ；`-v .\wavs:/data` 可能被解析到 WSL 里 |
+| 盘符要共享 | Docker Desktop → Settings → Resources → File sharing 勾选该盘 |
+| 输出目录先建好 | 宿主机 `outputs\` 不存在时 Docker 会建目录但**属主是 root**，Windows 下一般无感 |
+| 中文/空格路径 | 可用，但建议英文短路径（`D:\wavs`），避免转义麻烦 |
+| 只读挂载输入 | 想更安全可加 `:ro`：`-v "D:\wavs:/data:ro"` |
+
+## 6. 性能参考
+
+本机实测（20 核 x86_64，**纯 CPU，容器内同样走 CPU**）：
+
+| 项目 | 数值 |
+|---|---|
+| 模型加载（首次进进程） | 1–2 s |
+| 单条推理 | **约 100 ms/条**（8 条 0.8 s） |
+| 满载建议 | 一次传一个文件夹，几千条几分钟内跑完 |
+
+ARM64 容器（Apple Silicon / Windows on ARM）没有 MKL 优化，通常比 x86 慢 2–4 倍，实测为准。
+
+## 7. 常见问题
+
+| 现象 | 处理 |
+|---|---|
+| `docker: command not found` / 连接失败 | Docker Desktop 没启动；等托盘鲸鱼图标稳定 |
+| `pull access denied for ghcr.io/...` | 包不是 public：GitHub → Packages → xgb_wav → settings → Change visibility → Public；或 `docker login ghcr.io` |
+| 拉基础镜像超时（国内） | 配 registry mirror（见 §3），或改用方式 A 的 GHCR 镜像 |
+| `bind source path does not exist` | 路径写错或盘符没共享 |
+| CSV 没生成 | 看容器输出；常见是 `--input /data` 目录里没有 `.wav`（只认 `.wav/.WAV`） |
+| 中文乱码 | 容器内输出为 UTF-8；Windows 用 `chcp 65001` 或直接看 CSV（UTF-8-BOM，Excel 正常） |
+| 想改阈值/换模型 | 挂载自己的模型目录并加 `--models /mymodels`：`-v "D:\mymodels:/mymodels:ro"` |
+| 镜像太大 | 权重占 361 MB；如只想要轻量镜像，可把 `COPY models/` 删掉、改为运行时挂载 `-v models:/app/models` |
+
+## 8. 和 exe 方案怎么选
+
+| | Docker 镜像 | Windows exe |
+|---|---|---|
+| 适用机器 | 任何装了 Docker 的机器（含 ARM64） | 仅 **x64** Windows |
+| 目标机要装什么 | Docker Desktop（~1 GB） | 什么都不用装 |
+| 体积 | ~2.3 GB（镜像） | ~1.5–2 GB（目录） |
+| 图形界面 | ❌ 只有命令行 | ✅ 有 |
+| 构建难度 | CI 一键 / 本地一条命令 | 必须 x64 Windows 或 CI |
+
+> 结论：**产线/临时验证用 Docker（尤其你是 ARM64）**；
+> 需要给人双击就用的话，用 GitHub Actions 构建 exe。
+
