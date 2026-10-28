@@ -12,10 +12,25 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
+
+
+def _ensure_numba_cache() -> None:
+    """librosa 用 @numba.jit(cache=True)；打包成 exe/容器时源码目录可能不可写，
+    会报 "cannot cache function ... no locator available"。统一指向可写临时目录。"""
+    if os.environ.get("NUMBA_CACHE_DIR"):
+        return
+    try:
+        d = os.path.join(tempfile.gettempdir(), "xgb_wav_numba")
+        os.makedirs(d, exist_ok=True)
+        os.environ["NUMBA_CACHE_DIR"] = d
+    except Exception:  # pragma: no cover
+        pass
 
 
 def setup_console() -> None:
-    """在程序入口调用一次即可；非 Windows 平台什么都不做。"""
+    """在程序入口调用一次即可；非 Windows 平台只处理编码兜底。"""
+    _ensure_numba_cache()
     if os.name != "nt":
         # Linux/macOS 终端一般已是 UTF-8；若被重定向到 ascii 也能兜住
         for stream in (sys.stdout, sys.stderr):

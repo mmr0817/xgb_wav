@@ -103,7 +103,7 @@ echo [3/5] Self-test skipped
 
 REM ---------- 4) package ----------
 echo [4/5] Packaging with PyInstaller ...
-%PY% -m PyInstaller --noconfirm --clean scripts\xgb_wav.spec
+%PY% -m PyInstaller --noconfirm --clean --distpath "%CD%\dist" --workpath "%CD%\build" scripts\xgb_wav.spec
 if errorlevel 1 goto :err
 
 REM ---------- 5) copy models ----------
