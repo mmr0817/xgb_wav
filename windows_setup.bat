@@ -1,11 +1,11 @@
 @echo off
 REM ============================================================
-REM  xgb_wav  Windows 一键安装（双击运行）
-REM    1) 找到 Python(64 位, >=3.12)
-REM    2) 创建 .venv 虚拟环境
-REM    3) 安装依赖（失败自动换清华镜像重试）
-REM    4) 运行 doctor.py 自检
-REM  纯 ASCII，避免 cmd 代码页问题
+REM  xgb_wav  Windows one-click setup (double-click to run)
+REM    1) find 64-bit Python >= 3.12
+REM    2) create .venv
+REM    3) install requirements (retry with Tsinghua mirror on failure)
+REM    4) run doctor.py self-check
+REM  ASCII only, avoids cmd codepage issues
 REM ============================================================
 setlocal
 cd /d "%~dp0"
@@ -16,23 +16,33 @@ echo  dir: %CD%
 echo ============================================================
 
 set "PY="
-where py >nul 2>nul
-if not errorlevel 1 set "PY=py -3"
+py -3.13 -c "import sys;sys.exit(0 if sys.maxsize>2**32 else 1)" >nul 2>nul
+if not errorlevel 1 set "PY=py -3.13"
 if not defined PY (
-    where python >nul 2>nul
+    py -3.12 -c "import sys;sys.exit(0 if sys.maxsize>2**32 else 1)" >nul 2>nul
+    if not errorlevel 1 set "PY=py -3.12"
+)
+if not defined PY (
+    python -c "import sys;sys.exit(0 if (sys.version_info>=(3,12) and sys.maxsize>2**32) else 1)" >nul 2>nul
     if not errorlevel 1 set "PY=python"
 )
 if not defined PY goto :nopython
 
-%PY% -c "import sys; print('[0] Python', sys.version.split()[0], '64bit' if sys.maxsize>2**32 else '32bit'); sys.exit(0 if (sys.version_info>=(3,12) and sys.maxsize>2**32) else 1)"
-if errorlevel 1 goto :badpython
+%PY% -c "import sys; print('[0/4] Python', sys.version.split()[0], '64bit' if sys.maxsize>2**32 else '32bit', '|', sys.executable)"
 
 echo [1/4] create venv .venv ...
+if exist ".venv\Scripts\python.exe" (
+    "%CD%\.venv\Scripts\python.exe" -c "import sys;sys.exit(0 if sys.version_info>=(3,12) else 1)" >nul 2>nul
+    if errorlevel 1 (
+        echo       existing .venv is too old, recreating ...
+        rmdir /s /q .venv
+    )
+)
 if not exist ".venv\Scripts\python.exe" (
     %PY% -m venv .venv
     if errorlevel 1 goto :err
 ) else (
-    echo       .venv already exists
+    echo       .venv already exists ^(Python 3.12+^)
 )
 set "VPY=%CD%\.venv\Scripts\python.exe"
 
@@ -70,10 +80,19 @@ exit /b 0
 
 :nopython
 echo.
-echo [ERROR] Python not found in PATH.
-echo   Install Python 3.12 or 3.13 (64-bit):
-echo     https://www.python.org/downloads/windows/
-echo   During install TICK:  Add python.exe to PATH
+echo [ERROR] 64-bit Python 3.12+ was not found.
+echo.
+echo   Detected interpreters:
+py -0
+echo.
+echo   Why 3.12+: the model was saved by xgboost 3.4.1, which requires Python ^>= 3.12.
+echo              On 3.10/3.11 pip installs xgboost 3.2.0 and the model cannot be loaded.
+echo.
+echo   Install 3.12 or newer, then run this script again:
+echo     winget install -e --id Python.Python.3.12
+echo     or https://www.python.org/downloads/windows/   ^(tick "Add python.exe to PATH"^)
+echo.
+echo   You do NOT need to uninstall your existing 3.10 - py -3.13 / py -3.12 is used first.
 pause
 exit /b 1
 

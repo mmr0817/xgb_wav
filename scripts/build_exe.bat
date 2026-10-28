@@ -8,6 +8,11 @@ REM
 REM  Output:
 REM      dist\xgb_wav\xgb_wav.exe   (+ models\ copied next to it)
 REM
+REM  Requires 64-bit Python 3.12 or newer:
+REM      the model was saved by xgboost 3.4.1, which needs Python >= 3.12.
+REM  The script auto-detects: py -3.13 -> py -3.12 -> python (if it is 3.12+).
+REM  Having Python 3.10 installed as well is fine.
+REM
 REM  Optional flags (set before running):
 REM      set SKIP_PIP=1     skip pip install (deps already present)
 REM      set NO_SELFTEST=1  skip the pre-build inference self-test
@@ -23,33 +28,35 @@ echo ============================================================
 echo  xgb_wav build   ^|  %CD%
 echo ============================================================
 
-REM ---------- 0) Python ----------
-where python >nul 2>nul
-if errorlevel 1 (
-    echo [ERROR] python not found in PATH.
-    echo         Install Python 3.12+ ^(64-bit^) and tick "Add to PATH".
-    goto :err
+REM ---------- 0) find a 64-bit Python >= 3.12 ----------
+set "PY="
+py -3.13 -c "import sys;sys.exit(0 if sys.maxsize>2**32 else 1)" >nul 2>nul
+if not errorlevel 1 set "PY=py -3.13"
+if not defined PY (
+    py -3.12 -c "import sys;sys.exit(0 if sys.maxsize>2**32 else 1)" >nul 2>nul
+    if not errorlevel 1 set "PY=py -3.12"
 )
-python -c "import sys; print('[0/5] Python', sys.version.split()[0], '64bit' if sys.maxsize>2**32 else '32bit'); sys.exit(0 if (sys.version_info>=(3,12) and sys.maxsize>2**32) else 1)"
-if errorlevel 1 (
-    echo [ERROR] 64-bit Python 3.12+ is required.
-    echo         xgboost==3.4.1 needs Python ^>= 3.12; 3.11 would install 3.2.0 and fail to load the model.
-    goto :err
+if not defined PY (
+    python -c "import sys;sys.exit(0 if (sys.version_info>=(3,12) and sys.maxsize>2**32) else 1)" >nul 2>nul
+    if not errorlevel 1 set "PY=python"
 )
+if not defined PY goto :nopython
+
+%PY% -c "import sys;print('[0/5] Python', sys.version.split()[0], '64bit' if sys.maxsize>2**32 else '32bit', '|', sys.executable)"
 
 REM ---------- 1) dependencies ----------
 if "%SKIP_PIP%"=="1" goto :skip_pip
 echo [1/5] Installing dependencies ...
-python -m pip install -U pip
+%PY% -m pip install -U pip
 if errorlevel 1 goto :err
 if "%CUDA%"=="1" (
-    python -m pip install torch torchaudio
+    %PY% -m pip install torch torchaudio
 ) else (
     echo       CPU-only torch ^(smaller download, no GPU needed^)
-    python -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+    %PY% -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 )
 if errorlevel 1 goto :err
-python -m pip install -r requirements.txt pyinstaller
+%PY% -m pip install -r requirements.txt pyinstaller
 if errorlevel 1 goto :err
 :skip_pip
 
@@ -65,7 +72,7 @@ REM ---------- 3) inference self-test ----------
 if "%NO_SELFTEST%"=="1" goto :skip_test
 echo [3/5] Self-test: CLI inference on models\ref_sweep.wav ...
 set "PYTHONPATH=%CD%\src"
-python -m xgb_wav.cli --models models --input models\ref_sweep.wav --output build_selftest.csv
+%PY% -m xgb_wav.cli --models models --input models\ref_sweep.wav --output build_selftest.csv
 if errorlevel 1 (
     echo [ERROR] self-test failed - fix the runtime BEFORE packaging.
     goto :err
@@ -78,7 +85,7 @@ echo [3/5] Self-test skipped
 
 REM ---------- 4) package ----------
 echo [4/5] Packaging with PyInstaller ...
-python -m PyInstaller --noconfirm --clean scripts\xgb_wav.spec
+%PY% -m PyInstaller --noconfirm --clean scripts\xgb_wav.spec
 if errorlevel 1 goto :err
 
 REM ---------- 5) copy models ----------
@@ -113,6 +120,26 @@ if exist "%~1" (
 )
 echo   MISSING  %~1
 echo [ERROR] models\ is incomplete. Copy the trained model folder here first.
+exit /b 1
+
+:nopython
+echo.
+echo [ERROR] 64-bit Python 3.12+ was not found.
+echo.
+echo   Detected interpreters:
+py -0
+echo.
+echo   Why 3.12+: the model was saved by xgboost 3.4.1, which requires Python ^>= 3.12.
+echo              On 3.10/3.11 pip installs xgboost 3.2.0 and the model cannot be loaded.
+echo.
+echo   Install 3.12 or newer, then run this script again:
+echo     winget install -e --id Python.Python.3.12
+echo     or https://www.python.org/downloads/windows/   ^(tick "Add python.exe to PATH"^)
+echo.
+echo   You do NOT need to uninstall 3.10 - this script prefers py -3.13 / py -3.12.
+echo   Alternative: use the Docker image ^(windows_setup.bat is not required^).
+echo.
+pause
 exit /b 1
 
 :err

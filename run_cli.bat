@@ -1,16 +1,18 @@
 @echo off
 REM ============================================================
-REM  命令行批量检测：双击后把 wav 文件夹拖进来（或直接输入路径）
-REM  结果 CSV 输出到 outputs\cli\
+REM  Batch detection: double-click, drag a wav folder in, press Enter
+REM  CSV goes to outputs\cli\
 REM ============================================================
 setlocal
 cd /d "%~dp0"
 
 set "PY="
 if exist ".venv\Scripts\python.exe" set "PY=.venv\Scripts\python.exe"
-if not defined PY where py >nul 2>nul
-if not defined PY if not errorlevel 1 set "PY=py -3"
-if not defined PY where python >nul 2>nul
+if not defined PY py -3.13 -c "import sys;sys.exit(0 if sys.maxsize>2**32 else 1)" >nul 2>nul
+if not defined PY if not errorlevel 1 set "PY=py -3.13"
+if not defined PY py -3.12 -c "import sys;sys.exit(0 if sys.maxsize>2**32 else 1)" >nul 2>nul
+if not defined PY if not errorlevel 1 set "PY=py -3.12"
+if not defined PY python -c "import sys;sys.exit(0 if (sys.version_info>=(3,12) and sys.maxsize>2**32) else 1)" >nul 2>nul
 if not defined PY if not errorlevel 1 set "PY=python"
 if not defined PY goto :nopy
 

@@ -1,15 +1,17 @@
 @echo off
 REM ============================================================
-REM  双击启动图形界面（出错时窗口会停留，方便看报错）
+REM  Double-click to start the GUI; window stays open on error
 REM ============================================================
 setlocal
 cd /d "%~dp0"
 
 set "PY="
 if exist ".venv\Scripts\python.exe" set "PY=.venv\Scripts\python.exe"
-if not defined PY where py >nul 2>nul
-if not defined PY if not errorlevel 1 set "PY=py -3"
-if not defined PY where python >nul 2>nul
+if not defined PY py -3.13 -c "import sys;sys.exit(0 if sys.maxsize>2**32 else 1)" >nul 2>nul
+if not defined PY if not errorlevel 1 set "PY=py -3.13"
+if not defined PY py -3.12 -c "import sys;sys.exit(0 if sys.maxsize>2**32 else 1)" >nul 2>nul
+if not defined PY if not errorlevel 1 set "PY=py -3.12"
+if not defined PY python -c "import sys;sys.exit(0 if (sys.version_info>=(3,12) and sys.maxsize>2**32) else 1)" >nul 2>nul
 if not defined PY if not errorlevel 1 set "PY=python"
 if not defined PY goto :nopy
 
