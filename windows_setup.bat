@@ -31,10 +31,12 @@ if not defined PY goto :nopython
 %PY% -c "import sys; print('[0/4] Python', sys.version.split()[0], '64bit' if sys.maxsize>2**32 else '32bit', '|', sys.executable)"
 
 echo [1/4] create venv .venv ...
+REM .venv cannot be copied between PCs: compiled .pyd files bind to one Python ABI.
+REM Validate by actually importing the key packages, not just by version number.
 if exist ".venv\Scripts\python.exe" (
-    "%CD%\.venv\Scripts\python.exe" -c "import sys;sys.exit(0 if sys.version_info>=(3,12) else 1)" >nul 2>nul
+    "%CD%\.venv\Scripts\python.exe" -c "import sys, numpy, torch, xgboost; sys.exit(0 if sys.version_info>=(3,12) else 1)" >nul 2>nul
     if errorlevel 1 (
-        echo       existing .venv is too old, recreating ...
+        echo       existing .venv is unusable ^(wrong Python or copied from another PC^), recreating ...
         rmdir /s /q .venv
     )
 )
@@ -42,7 +44,7 @@ if not exist ".venv\Scripts\python.exe" (
     %PY% -m venv .venv
     if errorlevel 1 goto :err
 ) else (
-    echo       .venv already exists ^(Python 3.12+^)
+    echo       .venv already exists and looks good
 )
 set "VPY=%CD%\.venv\Scripts\python.exe"
 
