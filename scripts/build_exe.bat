@@ -47,16 +47,32 @@ if not defined PY goto :nopython
 REM ---------- 1) dependencies ----------
 if "%SKIP_PIP%"=="1" goto :skip_pip
 echo [1/5] Installing dependencies ...
-%PY% -m pip install -U pip
-if errorlevel 1 goto :err
-if "%CUDA%"=="1" (
-    %PY% -m pip install torch torchaudio
-) else (
-    echo       CPU-only torch ^(smaller download, no GPU needed^)
-    %PY% -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+REM Optional mirror, e.g.:
+REM    set PIP_MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple
+set "PIPOPT="
+if not "%PIP_MIRROR%"=="" (
+    echo       pip mirror: %PIP_MIRROR%
+    set "PIPOPT=-i %PIP_MIRROR%"
 )
+%PY% -m pip install -U pip %PIPOPT%
 if errorlevel 1 goto :err
-%PY% -m pip install -r requirements.txt pyinstaller
+
+if "%CUDA%"=="1" goto :pip_cuda
+if not "%PIP_MIRROR%"=="" goto :pip_torch_mirror
+echo       CPU-only torch from pytorch CPU index
+%PY% -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+goto :pip_torch_done
+:pip_torch_mirror
+echo       CPU-only torch from mirror ^(PyPI win_amd64 wheel is CPU-only^)
+%PY% -m pip install torch torchaudio %PIPOPT%
+goto :pip_torch_done
+:pip_cuda
+echo       CUDA torch from index/PyPI
+%PY% -m pip install torch torchaudio %PIPOPT%
+:pip_torch_done
+if errorlevel 1 goto :err
+%PY% -m pip install -r requirements.txt pyinstaller %PIPOPT%
 if errorlevel 1 goto :err
 :skip_pip
 

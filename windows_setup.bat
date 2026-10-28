@@ -47,11 +47,17 @@ if not exist ".venv\Scripts\python.exe" (
 set "VPY=%CD%\.venv\Scripts\python.exe"
 
 echo [2/4] upgrade pip ...
-"%VPY%" -m pip install -U pip
+REM Optional mirror: set PIP_MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple
+set "PIPOPT="
+if not "%PIP_MIRROR%"=="" (
+    echo       pip mirror: %PIP_MIRROR%
+    set "PIPOPT=-i %PIP_MIRROR%"
+)
+"%VPY%" -m pip install -U pip %PIPOPT%
 if errorlevel 1 goto :err
 
 echo [3/4] install dependencies, this can take 5-15 min ...
-"%VPY%" -m pip install -r requirements.txt
+"%VPY%" -m pip install -r requirements.txt %PIPOPT%
 if errorlevel 1 goto :mirror
 
 echo [4/4] self check ...
