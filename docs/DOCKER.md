@@ -178,3 +178,60 @@ docker run --rm --entrypoint python xgb_wav:1.0 doctor.py
 > 结论：**产线/临时验证用 Docker（尤其你是 ARM64）**；
 > 需要给人双击就用的话，用 GitHub Actions 构建 exe。
 
+
+## 9. 离线镜像包（拷到 Mac / 无网机器上用）
+
+镜像已打包成可直接导入的文件（**不需要联网、不需要 GitHub**）：
+
+| 文件 | 大小 | SHA-256 |
+|---|---|---|
+| `xgb_wav_docker_amd64.tar.gz` | **1.2 GB** | `59d9aeef7af34001ef9d9ea2786bf98066b59650022998f617495a1e7ffcee7e` |
+| `xgb_wav_docker_amd64.tar.gz.sha256` | 校验文件 | — |
+
+> 架构是 **linux/amd64**（本机 x86_64，无法交叉构建 arm64）。
+
+### macOS 上使用（含 Apple Silicon）
+
+1. 安装并启动 **Docker Desktop for Mac**，等托盘鲸鱼图标稳定。
+2. 把 tar.gz 与仓库里的 `docker_load.command` 放同一目录，**双击 `docker_load.command`**
+   （首次被 Gatekeeper 拦 → 右键 → 打开）。等价于：
+
+   ```bash
+   docker load -i xgb_wav_docker_amd64.tar.gz
+   docker run --rm --entrypoint python xgb_wav:1.0 doctor.py
+   ```
+
+3. 批量检测：
+
+   ```bash
+   mkdir -p ~/xgb_out
+   docker run --rm -v "$HOME/wavs:/data:ro" -v "$HOME/xgb_out:/out" \
+     xgb_wav:1.0 --input /data --out-dir /out
+   ```
+
+**Apple Silicon 提速**（该镜像为 amd64，需要模拟运行）：
+
+| 方式 | 操作 | 效果 |
+|---|---|---|
+| 开 Rosetta 模拟 | Docker Desktop → Settings → General → 勾选 *Use Rosetta for x86/amd64 emulation* | 明显更快（先试这个） |
+| 构建原生 arm64 | 仓库根目录 `bash docker_build.sh`（10–20 分钟） | 最快，覆盖同名 `xgb_wav:1.0` |
+
+也可显式声明平台消除警告：`docker run --platform linux/amd64 ...`
+
+### 校验完整性
+
+```bash
+shasum -a 256 xgb_wav_docker_amd64.tar.gz   # macOS
+sha256sum xgb_wav_docker_amd64.tar.gz       # Linux
+```
+
+### 打包机上的实测记录
+
+```
+docker load -i xgb_wav_docker_amd64.tar.gz  → Loaded image: xgb_wav:1.0（5.8 s）
+docker image inspect                         → linux/amd64, 3.84 GB
+8 条 wav：346 ms/条，bad 3 / good 5（与宿主机一致）
+204 条留出集：R=1.0000 / P=0.9118 / 误杀 3-173 / AUC 0.9983（与训练标定一致）
+容器内 doctor.py：全部检查通过
+```
+

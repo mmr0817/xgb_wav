@@ -249,6 +249,7 @@ docker run --rm -v "D:/wavs:/data" -v "$PWD/outputs:/out" \
 | 一键跑（Windows/macOS，含 ARM） | `docker_run.bat`（拖入 wav 文件夹）/ `docker run ...` |
 | 自己构建镜像 | `docker_build.bat`（Windows）/ `bash docker_build.sh` |
 | 详细说明（挂载、镜像加速、GHCR 权限、性能） | [`docs/DOCKER.md`](docs/DOCKER.md) |
+| **离线镜像包（拷到 Mac 直接 load）** | `xgb_wav_docker_amd64.tar.gz`（1.2 GB）+ 双击 `docker_load.command`，见 [docs/DOCKER.md §9](docs/DOCKER.md) |
 
 镜像 3.84 GB（含 361 MB 权重）；容器内实测约 350 ms/条（8 条 5 s 跑完）。
 

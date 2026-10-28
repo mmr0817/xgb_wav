@@ -29,3 +29,6 @@ nohup.out
 
 .pytest_cache/
 doctor_report.txt
+
+*.tar
+*.tar.gz
