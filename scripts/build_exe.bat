@@ -42,7 +42,9 @@ if not defined PY (
 )
 if not defined PY goto :nopython
 
-%PY% -c "import sys;print('[0/5] Python', sys.version.split()[0], '64bit' if sys.maxsize>2**32 else '32bit', '|', sys.executable)"
+%PY% -c "import sys, platform; m = platform.machine().lower(); print('[0/5] Python', sys.version.split()[0], m, '|', sys.executable); sys.exit(0 if m in ('amd64', 'x86_64') else 3)"
+if errorlevel 3 goto :armpython
+if errorlevel 1 goto :err
 
 REM ---------- 1) dependencies ----------
 if "%SKIP_PIP%"=="1" goto :skip_pip
@@ -148,14 +150,42 @@ echo.
 echo   Why 3.12+: the model was saved by xgboost 3.4.1, which requires Python ^>= 3.12.
 echo              On 3.10/3.11 pip installs xgboost 3.2.0 and the model cannot be loaded.
 echo.
-echo   Install 3.12 or newer, then run this script again:
-echo     winget install -e --id Python.Python.3.12
+echo   Your existing Python 3.10 stays untouched.
+echo.
+choice /c YN /n /m "Install Python 3.12 automatically now (uses winget / python.org) ? [Y/N] "
+if errorlevel 2 goto :np_manual
+if exist "%~dp0..\install_python312.bat" goto :np_launch
+echo   install_python312.bat not found - falling back to manual steps.
+goto :np_manual
+:np_launch
+echo.
+echo   Opening installer in a new window. Wait for it to finish,
+echo   then CLOSE this window, open a NEW cmd and run scripts\build_exe.bat again.
+start "" "%~dp0..\install_python312.bat"
+pause
+exit /b 1
+
+:np_manual
+echo.
+echo   Manual install:
+echo     winget install -e --id Python.Python.3.12 --scope user
 echo     or https://www.python.org/downloads/windows/   ^(tick "Add python.exe to PATH"^)
+echo   or just double-click  install_python312.bat  in the repo root.
 echo.
-echo   Or simply double-click  install_python312.bat  in the repo root.
+echo   Alternative: use the Docker image instead ^(docker_run.bat^).
 echo.
-echo   You do NOT need to uninstall 3.10 - this script prefers py -3.13 / py -3.12.
-echo   Alternative: use the Docker image ^(windows_setup.bat is not required^).
+pause
+exit /b 1
+
+:armpython
+echo.
+echo [ERROR] The selected Python is an ARM64 build.
+echo.
+echo   PyTorch has NO win_arm64 wheels, so pip install torch would fail.
+echo   Install the x64 build of Python 3.12 instead:
+echo     double-click  install_python312.bat   ^(it forces the x64 installer^)
+echo   or download "Windows installer (64-bit)" from
+echo     https://www.python.org/downloads/windows/
 echo.
 pause
 exit /b 1
