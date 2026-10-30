@@ -128,6 +128,8 @@ def suggest(
     recall_targets: Sequence[float] = (1.0, 0.995, 0.95),
 ) -> List[Candidate]:
     """生成候选阈值（含模型标定值作对照），第一个 recommended 为建议值。"""
+    if mode not in MODES:
+        raise ValueError(f"未知模式: {mode}（可选 {', '.join(MODES)}）")
     arr = np.asarray(list(scores), dtype=float)
     out: List[Candidate] = []
 
