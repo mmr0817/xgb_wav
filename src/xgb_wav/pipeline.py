@@ -89,12 +89,22 @@ class FusionDetector:
             self.xgb_source = "joblib"
 
         self.rule = FusionRule.from_json(cfg.fusion)
+        self.default_threshold = float(self.rule.threshold)
         self.extractor = FeatureExtractor(self.feat_cfg, cfg.ref_sweep)
         self.device = device
         self.w2v_model = load_checkpoint(
             cfg.w2v_ckpt, device=device, hidden_size=cfg.w2v_hidden,
             backbone=str(pack.get("w2v_backbone") or "") or None,
             arch=cfg.w2v_arch)
+
+    def set_threshold(self, value: float) -> float:
+        """运行期调整判定阈值（只影响重判，不重新推理）。"""
+        self.rule.threshold = float(value)
+        return self.rule.threshold
+
+    @property
+    def threshold(self) -> float:
+        return float(self.rule.threshold)
 
     # ---------- 构造 ----------
     @classmethod

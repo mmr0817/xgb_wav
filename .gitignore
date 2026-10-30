@@ -32,3 +32,12 @@ doctor_report.txt
 
 *.tar
 *.tar.gz
+
+# 用户设置（GUI 运行时生成）
+settings.json
+
+# 构建产物
+*.spec
+build/
+dist/
+*.exe

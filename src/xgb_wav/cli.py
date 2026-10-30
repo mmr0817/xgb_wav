@@ -9,6 +9,7 @@ from pathlib import Path
 from ._console import setup_console
 from .data import discover_wavs
 from .pipeline import FusionDetector
+from .settings import set_threshold
 
 
 def parse_args() -> argparse.Namespace:
@@ -17,6 +18,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--input", required=True, help="待检测的 wav 文件或文件夹")
     p.add_argument("--output", default="predictions.csv", help="输出 CSV 路径")
     p.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
+    p.add_argument("--threshold", type=float, default=None,
+                   help="覆盖判定阈值（默认用 models/fusion.json）")
+    p.add_argument("--save-threshold", action="store_true",
+                   help="把 --threshold 写入程序目录的 settings.json（GUI 会读取）")
     p.add_argument("--batch-size", type=int, default=None, help="wav2vec2 推理 batch（默认取模型配置）")
     p.add_argument("--info", action="store_true", help="只打印模型信息后退出")
     return p.parse_args()
@@ -26,6 +31,11 @@ def main() -> None:
     setup_console()
     args = parse_args()
     det = FusionDetector.from_dir(args.models, device=args.device)
+    if args.threshold is not None:
+        det.set_threshold(args.threshold)
+        print(f"已覆盖阈值: {det.threshold:.4f}")
+        if args.save_threshold:
+            print(f"阈值已写入: {set_threshold(det.threshold)}")
     print(f"模型目录: {Path(args.models).resolve()}")
     print(f"融合规则: {det.rule.summary()}")
     print(f"设备: {det.device}")

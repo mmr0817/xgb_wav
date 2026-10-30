@@ -1,7 +1,7 @@
-"""图形界面（tkinter）：选择文件/文件夹 -> 检测 -> 导出 CSV。
+"""图形界面（tkinter）：选择文件/文件夹 -> 检测 -> 调阈值 -> 导出 CSV。
 
-打包后可直接双击运行；未打包时：
-    python -m xgb_wav.gui
+打包后可直接双击运行；未打包时：python main.py
+阈值可在界面里实时调整（不重新推理，只按已有融合分重判），并保存到 settings.json。
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sys
 import threading
 import traceback
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import pandas as pd
 import tkinter as tk
@@ -20,6 +20,7 @@ from tkinter import filedialog, messagebox, ttk
 from ._console import setup_console
 from .data import discover_wavs
 from .pipeline import FusionDetector
+from .settings import app_dir, load_settings, save_settings  # noqa: F401  (GUI 也在用)
 
 
 def default_model_dir() -> Path:
@@ -47,6 +48,9 @@ class App(tk.Tk):
         self.paths: List[Path] = []
         self.result: Optional[pd.DataFrame] = None
         self.queue: "queue.Queue" = queue.Queue()
+        self.settings: Dict[str, object] = load_settings()
+        self.model_threshold: float = 0.0      # 模型自带阈值（恢复默认用）
+        self._relabel_job = None
 
         self._build_ui()
         self.after(100, self._poll_queue)
@@ -74,8 +78,25 @@ class App(tk.Tk):
         ttk.Entry(top, textvariable=self.out_var, width=72).grid(row=2, column=1, sticky="we", padx=4)
         ttk.Button(top, text="另存为…", command=self.pick_output).grid(row=2, column=2, padx=4)
 
+        thr_row = ttk.Frame(top)
+        thr_row.grid(row=3, column=0, columnspan=4, sticky="we", padx=6, pady=2)
+        ttk.Label(thr_row, text="判定阈值:").pack(side="left")
+        self.thr_var = tk.DoubleVar(value=0.0)
+        self.thr_spin = ttk.Spinbox(thr_row, from_=-2.0, to=6.0, increment=0.01,
+                                    textvariable=self.thr_var, width=8,
+                                    command=self._on_thr_change)
+        self.thr_spin.pack(side="left", padx=4)
+        self.thr_scale = ttk.Scale(thr_row, from_=-1.0, to=3.0,
+                                   variable=self.thr_var, command=self._on_thr_change)
+        self.thr_scale.pack(side="left", fill="x", expand=True, padx=8)
+        ttk.Button(thr_row, text="应用", command=self.apply_threshold).pack(side="left", padx=4)
+        ttk.Button(thr_row, text="恢复模型默认",
+                   command=self.reset_threshold).pack(side="left", padx=4)
+        self.thr_info = tk.StringVar(value="阈值越大：漏检↑ 误杀↓")
+        ttk.Label(thr_row, textvariable=self.thr_info).pack(side="left", padx=8)
+
         row = ttk.Frame(top)
-        row.grid(row=3, column=0, columnspan=4, sticky="we", pady=6)
+        row.grid(row=4, column=0, columnspan=4, sticky="we", pady=6)
         self.run_btn = ttk.Button(row, text="开始检测", command=self.start, state="disabled")
         self.run_btn.pack(side="left", padx=8)
         self.export_btn = ttk.Button(row, text="导出 CSV", command=self.export, state="disabled")
@@ -136,6 +157,51 @@ class App(tk.Tk):
         if f:
             self.out_var.set(f)
 
+    # ---------------- 阈值 ----------------
+    def _on_thr_change(self, _evt=None) -> None:
+        """拖动滑块/改数字后稍作防抖，再重新判定（不重新推理）。"""
+        if self._relabel_job is not None:
+            try:
+                self.after_cancel(self._relabel_job)
+            except Exception:
+                pass
+        self._relabel_job = self.after(250, self.apply_threshold)
+
+    def apply_threshold(self) -> None:
+        self._relabel_job = None
+        if self.detector is None:
+            return
+        try:
+            thr = round(float(self.thr_var.get()), 4)
+        except (tk.TclError, ValueError):
+            return
+        self.thr_var.set(thr)
+        self.detector.set_threshold(thr)
+        if self.result is not None and len(self.result):
+            self.result["threshold"] = thr
+            self.result["pred"] = (self.result["score"].to_numpy() >= thr).astype(int)
+            self.result["label"] = [self.detector.rule.label_of(v)
+                                    for v in self.result["pred"]]
+            self._render_results()
+        self._update_thr_info()
+        self.settings["threshold"] = thr
+        save_settings(self.settings)
+
+    def reset_threshold(self) -> None:
+        self.thr_var.set(round(float(self.model_threshold), 4))
+        self.apply_threshold()
+
+    def _update_thr_info(self) -> None:
+        if self.detector is None:
+            self.thr_info.set("")
+            return
+        thr = float(self.thr_var.get())
+        if self.result is not None and len(self.result):
+            n_bad = int((self.result["pred"] == 1).sum())
+            self.thr_info.set(f"阈值 {thr:.4f}｜bad {n_bad} / good {len(self.result) - n_bad}")
+        else:
+            self.thr_info.set(f"阈值 {thr:.4f}（模型默认 {self.model_threshold:.4f}）")
+
     # ---------------- 模型 ----------------
     def _load_model_async(self) -> None:
         self.status.set("正在加载模型…")
@@ -176,6 +242,14 @@ class App(tk.Tk):
                 kind, payload = self.queue.get_nowait()
                 if kind == "model":
                     self.detector = payload
+                    self.model_threshold = float(payload.default_threshold)
+                    try:
+                        thr = float(self.settings.get("threshold", self.model_threshold))
+                    except (TypeError, ValueError):
+                        thr = self.model_threshold
+                    self.thr_var.set(round(thr, 4))
+                    payload.set_threshold(thr)
+                    self._update_thr_info()
                     self.status.set(f"模型就绪（{payload.device}）· {payload.rule.summary()}")
                     self.run_btn.configure(state="normal" if self.paths else "disabled")
                 elif kind == "result":
@@ -191,27 +265,47 @@ class App(tk.Tk):
 
     def _show_result(self, df: pd.DataFrame) -> None:
         self.result = df
+        self._render_results()
+        self.progress.configure(value=len(df))
+        n_bad = int((df["pred"] == 1).sum())
+        self.status.set(f"完成：{len(df)} 条，bad {n_bad}，good {len(df) - n_bad}，"
+                        f"耗时 {df.attrs.get('elapsed', 0):.1f}s（阈值可调）")
+        self.export_btn.configure(state="normal")
+        self.run_btn.configure(state="normal")
+        self.export()
+
+    def _render_results(self) -> None:
+        """按当前阈值重绘表格（阈值调整后调用，不重新推理）。"""
+        df = self.result
+        if df is None:
+            return
+        self.tree.delete(*self.tree.get_children())
         for _, r in df.iterrows():
             self.tree.insert("", "end",
                              values=(r["file"], r["label"], f"{r['score']:.3f}",
                                      f"{r['xgb_proba']:.4f}", f"{r['w2v_proba']:.4f}",
                                      r["channel"], r["batch"], r["path"]),
                              tags=(r["label"],))
-        self.progress.configure(value=len(df))
-        n_bad = int((df["pred"] == 1).sum())
-        self.status.set(f"完成：{len(df)} 条，bad {n_bad}，good {len(df) - n_bad}，"
-                        f"耗时 {df.attrs.get('elapsed', 0):.1f}s")
-        self.export_btn.configure(state="normal")
-        self.run_btn.configure(state="normal")
-        self.export()
+        self._update_thr_info()
 
     def export(self) -> None:
         if self.result is None:
             return
+        try:
+            thr = round(float(self.thr_var.get()), 4)
+        except (tk.TclError, ValueError):
+            thr = float(self.result["threshold"].iloc[0])
+        df = self.result.copy()
+        df["threshold"] = thr
+        df["pred"] = (df["score"].to_numpy() >= thr).astype(int)
+        if self.detector is not None:
+            df["label"] = [self.detector.rule.label_of(v) for v in df["pred"]]
         out = Path(self.out_var.get()).expanduser()
         out.parent.mkdir(parents=True, exist_ok=True)
-        self.result.to_csv(out, index=False, encoding="utf-8-sig")
-        self.log.insert("end", f"已导出: {out}\n")
+        df.to_csv(out, index=False, encoding="utf-8-sig")
+        n_bad = int((df["pred"] == 1).sum())
+        self.log.insert("end", f"已导出: {out}（阈值 {thr:.4f}，"
+                               f"bad {n_bad} / good {len(df) - n_bad}）\n")
         self.log.see("end")
 
 

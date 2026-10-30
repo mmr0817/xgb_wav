@@ -1,22 +1,14 @@
-# 运行时依赖（推理 / GUI）
+# 运行时依赖（GUI / 推理）
 numpy>=1.24
 scipy>=1.10
 scikit-learn>=1.3
 # 必须与训练环境一致：3.4.1 保存的模型无法被 3.2.0 加载
-# （xgboost 3.4.1 要求 Python >= 3.12；Python 3.11 只能装到 3.2.0，会加载失败）
+# （xgboost 3.4.1 要求 Python >= 3.12）
 xgboost==3.4.1
 librosa>=0.10
 soundfile>=0.12
 joblib>=1.3
 pandas>=2.0
-
-# wav2vec2 分支
+# wav2vec2 分支（Windows 的 PyPI 轮子本身就是 CPU 版）
 torch>=2.0
 torchaudio>=2.0
-
-# 训练用（可选）
-pyyaml>=6.0
-tqdm>=4.65
-
-# 打包用（Windows，可选）
-# pyinstaller>=6.0
