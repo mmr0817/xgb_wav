@@ -370,7 +370,7 @@ class AutoThresholdDialog(tk.Toplevel):
         super().__init__(app)
         self.app = app
         self.title("自动定阈 · 按本批分数分布")
-        self.geometry("760x430")
+        self.geometry("820x470")
         self.transient(app)
         self.grab_set()
         self.cands: List = []
@@ -410,7 +410,8 @@ class AutoThresholdDialog(tk.Toplevel):
         self.tree.bind("<Double-1>", lambda _e: self.apply_selected())
 
         self.note = tk.StringVar(value="")
-        ttk.Label(self, textvariable=self.note, foreground="#555").pack(anchor="w", padx=10)
+        ttk.Label(self, textvariable=self.note, foreground="#555",
+                  wraplength=780, justify="left").pack(anchor="w", padx=10)
 
         btns = ttk.Frame(self)
         btns.pack(fill="x", padx=10, pady=8)
@@ -436,7 +437,8 @@ class AutoThresholdDialog(tk.Toplevel):
             self.note.set("全好批次：阈值取到「最低且全部放行」；若高于标定值（红色），"
                           "说明本批有高分好件，需确认是否值得为此提高漏检风险。")
         else:
-            self.note.set("未知批次：按分数分布的自然分界（最大间隙 / Otsu）二分，适合好坏混杂时快速定阈。")
+            self.note.set("未知批次：只在「两侧都成规模、分界处确有低谷、且离标定值不远」时才推荐数据分界，"
+                          "否则建议沿用模型标定值；标红的行不建议采用。")
 
     def select_recommended(self) -> None:
         items = self.tree.get_children()
