@@ -20,6 +20,7 @@ from tkinter import filedialog, messagebox, ttk
 from ._console import setup_console
 from .data import discover_wavs
 from .pipeline import FusionDetector
+from .perf import apply_low_power
 from .settings import app_dir, load_settings, save_settings  # noqa: F401  (GUI 也在用)
 
 
@@ -95,6 +96,10 @@ class App(tk.Tk):
         self.thr_info = tk.StringVar(value="阈值越大：漏检↑ 误杀↓")
         ttk.Label(thr_row, textvariable=self.thr_info).pack(side="left", padx=8)
 
+        self.low_var = tk.BooleanVar(value=bool(load_settings().get("low_power", False)))
+        ttk.Checkbutton(thr_row, text="省电模式(≈1/4速度)", variable=self.low_var,
+                        command=self._on_low_power).pack(side="left", padx=8)
+
         row = ttk.Frame(top)
         row.grid(row=4, column=0, columnspan=4, sticky="we", pady=6)
         self.run_btn = ttk.Button(row, text="开始检测", command=self.start, state="disabled")
@@ -166,6 +171,15 @@ class App(tk.Tk):
             except Exception:
                 pass
         self._relabel_job = self.after(250, self.apply_threshold)
+
+    def _on_low_power(self) -> None:
+        """省电模式开关：立即生效（下次推理起限速），并写入 settings.json。"""
+        flag = bool(self.low_var.get())
+        apply_low_power(flag)
+        data = load_settings()
+        data["low_power"] = flag
+        save_settings(data)
+        self.status.set("省电模式已开启（约 1/4 速度，占用/发热更低）" if flag else "省电模式已关闭（全速）")
 
     def apply_threshold(self) -> None:
         self._relabel_job = None

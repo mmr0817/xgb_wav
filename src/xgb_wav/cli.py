@@ -8,7 +8,6 @@ from pathlib import Path
 
 from ._console import setup_console
 from .data import discover_wavs
-from .pipeline import FusionDetector
 from .settings import set_threshold
 
 
@@ -23,6 +22,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--save-threshold", action="store_true",
                    help="把 --threshold 写入程序目录的 settings.json（GUI 会读取）")
     p.add_argument("--batch-size", type=int, default=None, help="wav2vec2 推理 batch（默认取模型配置）")
+    p.add_argument("--low-power", action="store_true",
+                   help="省电模式：CPU+单线程+限速，速度约 1/4，占用/发热更低")
     p.add_argument("--info", action="store_true", help="只打印模型信息后退出")
     return p.parse_args()
 
@@ -30,6 +31,13 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     setup_console()
     args = parse_args()
+    if args.low_power:
+        from .perf import enable_low_power
+
+        enable_low_power()
+        print("省电模式已开启：CPU / 单线程 / 限速（约 1/4 速度）")
+    from .pipeline import FusionDetector
+
     det = FusionDetector.from_dir(args.models, device=args.device)
     if args.threshold is not None:
         det.set_threshold(args.threshold)

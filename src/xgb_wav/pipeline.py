@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .perf import is_low_power, throttle
+
 import json
 import time
 from dataclasses import dataclass
@@ -134,6 +136,8 @@ class FusionDetector:
                 device = "cuda" if torch.cuda.is_available() else "cpu"
             except Exception:
                 device = "cpu"
+        if is_low_power():  # 省电模式强制 CPU（权重随之落在 CPU，避免设备不一致）
+            device = "cpu"
         return cls(cfg, device=device)
 
     # ---------- 推理 ----------
@@ -148,10 +152,16 @@ class FusionDetector:
             raise ValueError(f"特征维度不一致：模型 {self.feature_dim}，当前 {X.shape[1]}")
         xgb_p = predict_bad_proba(self.xgb_model, self.scaler.transform(X))
         ok_files = [paths[i] for i in ok_idx]
-        w2v_p = w2v_predict(self.w2v_model, ok_files, device=self.device,
-                            batch_size=self.cfg.batch_size,
-                            sample_rate=self.cfg.w2v_sample_rate,
-                            max_duration=self.cfg.w2v_max_duration)
+        low = is_low_power()
+        w2v_p = w2v_predict(
+            self.w2v_model, ok_files,
+            device=self.device,
+            batch_size=max(1, min(4, self.cfg.batch_size)) if low else self.cfg.batch_size,
+            sample_rate=self.cfg.w2v_sample_rate,
+            max_duration=self.cfg.w2v_max_duration,
+        )
+        if low:  # 省电模式：按文件数线性等待，整体约 1/4 速度
+            throttle(len(ok_files))
         score = self.rule.score(xgb_p, w2v_p)
         pred = self.rule.decide(score)
 

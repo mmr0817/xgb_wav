@@ -14,8 +14,14 @@ if not getattr(sys, "frozen", False):
     sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from xgb_wav._console import setup_console  # noqa: E402
-from xgb_wav.gui import main  # noqa: E402
+from xgb_wav.perf import apply_low_power  # noqa: E402
+from xgb_wav.settings import load_settings  # noqa: E402
 
 if __name__ == "__main__":
     setup_console()
-    main()
+    # 省电模式必须在导入 torch/gui 之前应用（线程数只在进程启动时决定）
+    apply_low_power(bool(load_settings().get("low_power", False)))
+
+    from xgb_wav.gui import main as gui_main  # noqa: E402
+
+    gui_main()
