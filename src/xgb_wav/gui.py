@@ -1,7 +1,8 @@
 """图形界面（tkinter）：选择文件/文件夹 -> 检测 -> 调阈值 -> 导出 CSV。
 
 打包后可直接双击运行；未打包时：python main.py
-阈值可在界面里实时调整（不重新推理，只按已有融合分重判），并保存到 settings.json。
+阈值可在界面里实时调整（不重新推理，只按已有融合分重判），并保存到 settings.json；
+「自动定阈…」按本批分数分布给候选阈值（未知 / 全坏 / 全好三种假设，见 autothr.py）。
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from ._console import setup_console
+from .autothr import suggest as suggest_thresholds
 from .data import discover_wavs
 from .pipeline import FusionDetector
 from .perf import apply_low_power
@@ -93,6 +95,8 @@ class App(tk.Tk):
         ttk.Button(thr_row, text="应用", command=self.apply_threshold).pack(side="left", padx=4)
         ttk.Button(thr_row, text="恢复模型默认",
                    command=self.reset_threshold).pack(side="left", padx=4)
+        ttk.Button(thr_row, text="自动定阈…",
+                   command=self.auto_threshold_dialog).pack(side="left", padx=4)
         self.thr_info = tk.StringVar(value="阈值越大：漏检↑ 误杀↓")
         ttk.Label(thr_row, textvariable=self.thr_info).pack(side="left", padx=8)
 
@@ -216,6 +220,35 @@ class App(tk.Tk):
         else:
             self.thr_info.set(f"阈值 {thr:.4f}（模型默认 {self.model_threshold:.4f}）")
 
+    # ---------------- 按批自优化阈值 ----------------
+    def auto_threshold_dialog(self) -> None:
+        """按当前这一批的分数分布给候选阈值（三种假设：未知 / 全坏 / 全好）。"""
+        if self.result is None or not len(self.result):
+            messagebox.showinfo("自动定阈", "请先检测一批数据（点「开始检测」），再按本批分数定阈。")
+            return
+        AutoThresholdDialog(self)
+
+    def _log_thr_hint(self, df: pd.DataFrame) -> None:
+        """跑完一批后，在日志里提示本批分数分界在哪（不自动改阈值）。"""
+        try:
+            base = float(self.model_threshold or self.thr_var.get())
+            cands = suggest_thresholds(df["score"].to_numpy(), base, "auto")
+        except Exception:
+            return
+        rec = next((c for c in cands if c.recommended), None)
+        if rec is None or rec.key == "model":
+            return
+        try:
+            cur = float(self.thr_var.get())
+        except (tk.TclError, ValueError):
+            cur = base
+        if abs(rec.threshold - cur) < 1e-6:
+            return
+        self.log.insert("end", f"[提示] 本批分数{rec.title}在 {rec.threshold:+.3f}"
+                               f"（bad {rec.n_bad} / good {rec.n_good}）；"
+                               f"点「自动定阈…」可套用\n")
+        self.log.see("end")
+
     # ---------------- 模型 ----------------
     def _load_model_async(self) -> None:
         self.status.set("正在加载模型…")
@@ -286,6 +319,7 @@ class App(tk.Tk):
                         f"耗时 {df.attrs.get('elapsed', 0):.1f}s（阈值可调）")
         self.export_btn.configure(state="normal")
         self.run_btn.configure(state="normal")
+        self._log_thr_hint(df)
         self.export()
 
     def _render_results(self) -> None:
@@ -321,6 +355,110 @@ class App(tk.Tk):
         self.log.insert("end", f"已导出: {out}（阈值 {thr:.4f}，"
                                f"bad {n_bad} / good {len(df) - n_bad}）\n")
         self.log.see("end")
+
+
+class AutoThresholdDialog(tk.Toplevel):
+    """按当前批次分数分布，列出候选阈值供用户选择（不自动改，点「应用」才生效）。"""
+
+    MODE_LABELS = (
+        ("auto", "未知（自动找分界）"),
+        ("all_bad", "本批全是坏件（防漏检）"),
+        ("all_good", "本批全是好件（防误杀）"),
+    )
+
+    def __init__(self, app: "App") -> None:
+        super().__init__(app)
+        self.app = app
+        self.title("自动定阈 · 按本批分数分布")
+        self.geometry("760x430")
+        self.transient(app)
+        self.grab_set()
+        self.cands: List = []
+
+        df = app.result
+        self.scores = df["score"].to_numpy()
+        cur = float(app.thr_var.get())
+        info = (f"本批 {len(self.scores)} 条｜分数 min {self.scores.min():+.3f}"
+                f" / 中位 {float(df['score'].median()):+.3f}"
+                f" / max {self.scores.max():+.3f}｜当前阈值 {cur:.4f}")
+        ttk.Label(self, text=info).pack(anchor="w", padx=10, pady=(8, 0))
+
+        mode_row = ttk.Frame(self)
+        mode_row.pack(anchor="w", padx=10, pady=6)
+        ttk.Label(mode_row, text="这批数据是：").pack(side="left")
+        self.mode_var = tk.StringVar(value="auto")
+        for value, label in self.MODE_LABELS:
+            ttk.Radiobutton(mode_row, text=label, value=value,
+                            variable=self.mode_var,
+                            command=self.refresh).pack(side="left", padx=6)
+
+        cols = ("title", "thr", "bad", "good", "note")
+        titles = ("策略", "阈值", "bad", "good", "说明")
+        widths = (175, 80, 60, 60, 380)
+        wrap = ttk.Frame(self)
+        wrap.pack(fill="both", expand=True, padx=10)
+        self.tree = ttk.Treeview(wrap, columns=cols, show="headings", height=7)
+        for c, t, w in zip(cols, titles, widths):
+            self.tree.heading(c, text=t)
+            self.tree.column(c, width=w, anchor="w")
+        vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vsb.set)
+        self.tree.pack(side="left", fill="both", expand=True)
+        vsb.pack(side="right", fill="y")
+        self.tree.tag_configure("warn", foreground="#c0392b")
+        self.tree.tag_configure("rec", background="#e8f0fe")
+        self.tree.bind("<Double-1>", lambda _e: self.apply_selected())
+
+        self.note = tk.StringVar(value="")
+        ttk.Label(self, textvariable=self.note, foreground="#555").pack(anchor="w", padx=10)
+
+        btns = ttk.Frame(self)
+        btns.pack(fill="x", padx=10, pady=8)
+        ttk.Button(btns, text="应用所选阈值", command=self.apply_selected).pack(side="right", padx=4)
+        ttk.Button(btns, text="取消", command=self.destroy).pack(side="right", padx=4)
+        ttk.Button(btns, text="选中推荐值", command=self.select_recommended).pack(side="left", padx=4)
+
+        self.refresh()
+
+    def refresh(self) -> None:
+        base = float(self.app.model_threshold or self.app.thr_var.get())
+        self.cands = suggest_thresholds(self.scores, base, self.mode_var.get())
+        self.tree.delete(*self.tree.get_children())
+        for c in self.cands:
+            tags = ["rec"] if c.recommended else (["warn"] if c.warn else [])
+            self.tree.insert("", "end", tags=tags,
+                             values=(c.title, f"{c.threshold:.4f}", c.n_bad, c.n_good, c.note))
+        self.select_recommended()
+        if self.mode_var.get() == "all_bad":
+            self.note.set("全坏批次：阈值取到「最高且不漏」；若远低于模型标定值（红色），"
+                          "说明本批有低分坏件，产线上误杀会升高。")
+        elif self.mode_var.get() == "all_good":
+            self.note.set("全好批次：阈值取到「最低且全部放行」；若高于标定值（红色），"
+                          "说明本批有高分好件，需确认是否值得为此提高漏检风险。")
+        else:
+            self.note.set("未知批次：按分数分布的自然分界（最大间隙 / Otsu）二分，适合好坏混杂时快速定阈。")
+
+    def select_recommended(self) -> None:
+        items = self.tree.get_children()
+        if not items:
+            return
+        idx = next((i for i, c in enumerate(self.cands) if c.recommended), 0)
+        self.tree.selection_set(items[idx])
+        self.tree.focus(items[idx])
+
+    def apply_selected(self) -> None:
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showinfo("自动定阈", "请先选中一行。", parent=self)
+            return
+        idx = self.tree.index(sel[0])
+        c = self.cands[idx]
+        self.app.thr_var.set(round(float(c.threshold), 4))
+        self.app.apply_threshold()
+        self.app.log.insert("end", f"[自动定阈] {c.title} → 阈值 {c.threshold:.4f}"
+                                   f"（bad {c.n_bad} / good {c.n_good}）\n")
+        self.app.log.see("end")
+        self.destroy()
 
 
 def main() -> None:

@@ -24,6 +24,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--batch-size", type=int, default=None, help="wav2vec2 推理 batch（默认取模型配置）")
     p.add_argument("--low-power", action="store_true",
                    help="省电模式：CPU+单线程+限速，速度约 1/4，占用/发热更低")
+    p.add_argument("--auto-threshold", choices=["auto", "all_bad", "all_good"], default=None,
+                   help="按本批分数自动定阈：auto=找自然分界，all_bad=全命中（防漏检），"
+                        "all_good=全部放行（防误杀）")
     p.add_argument("--info", action="store_true", help="只打印模型信息后退出")
     return p.parse_args()
 
@@ -58,6 +61,19 @@ def main() -> None:
     paths = discover_wavs(src)
     print(f"待检测: {len(paths)} 个 wav（{src}）")
     df = det.predict_paths(paths)
+    if args.auto_threshold:
+        from .autothr import apply_mode
+
+        auto_thr = apply_mode(df["score"].to_numpy(), args.auto_threshold, det.threshold)
+        det.set_threshold(auto_thr)
+        df["threshold"] = auto_thr
+        df["pred"] = (df["score"].to_numpy() >= auto_thr).astype(int)
+        df["label"] = [det.rule.label_of(v) for v in df["pred"]]
+        n_bad = int(df["pred"].sum())
+        print(f"自动定阈({args.auto_threshold}): {auto_thr:.4f}"
+              f" → bad {n_bad} / good {len(df) - n_bad}")
+        if args.save_threshold:
+            print(f"阈值已写入: {set_threshold(auto_thr)}")
     out = det.save_csv(df, args.output)
     print(f"耗时 {df.attrs.get('elapsed', 0):.1f}s，失败 {df.attrs.get('skipped', 0)} 条")
     print(f"CSV: {out}")
